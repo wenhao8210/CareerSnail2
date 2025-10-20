@@ -2,6 +2,9 @@
 import { useState, useEffect } from "react";
 import AnalyzingTips from "./components/AnalyzingTips";
 import AnalysisPanel from "./components/AnalysisPanel";
+import ButtonTreasure from "./components/ButtonTreasure";
+
+
 
 
 
@@ -13,6 +16,7 @@ function NeonSearchBar({
   onChange: (val: string) => void;
 }) {
   return (
+
     <div className="relative w-full max-w-md group mb-4">
       {/* 发光外框 */}
       <div className="absolute -inset-0.5 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 rounded-lg blur opacity-60 group-hover:opacity-100 transition duration-300"></div>
@@ -126,15 +130,13 @@ export default function Home() {
 
   return (
     <main className="relative min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-950 to-black text-white overflow-hidden">
-      {/* === 顶部右上角按钮 === */}
-      <button
-        onClick={() =>
-          alert("🚧 新功能开发中：简历填写插件与面试题库即将上线！")
-        }
-        className="absolute top-6 right-6 px-4 py-2 bg-black/40 border border-gray-700 rounded-xl text-sm text-gray-300 hover:text-purple-300 hover:border-purple-400 transition backdrop-blur-sm"
-      >
-        ✨ 敬请期待：简历填写插件 | 面试题库
-      </button>
+      {/* 🧭 新增：问号宝箱固定在右上角 */}
+      <div className="fixed top-6 right-6 z-50">
+        <ButtonTreasure />
+      </div>
+
+
+
       {/* 赛博网格背景 */}
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(100,0,255,0.05)_0%,transparent_70%)]"></div>
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:40px_40px]"></div>
@@ -155,7 +157,7 @@ export default function Home() {
       </div>
       <div className="h-60" /> {/* spacer: 底部与版权之间 40px */}
 
-     
+
 
       {/* 文件上传 */}
       <div className="relative w-full max-w-sm mx-auto mb-6 z-10">
@@ -173,7 +175,7 @@ export default function Home() {
           {file ? `📄 ${file.name}` : "点击选择简历文件 (.pdf / .docx)"}
         </label>
       </div>
-       {/* 发光输入框 */}
+      {/* 发光输入框 */}
       <div className="w-full max-w-sm mx-auto mb-2">
         <NeonSearchBar value={targetRole} onChange={setTargetRole} />
       </div>
