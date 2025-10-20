@@ -90,8 +90,8 @@ export async function POST(req: Request) {
     // ✅ 新增：Word (.docx) 文件解析
     else if (file.name.toLowerCase().endsWith(".docx")) {
       try {
-        // 👇 修复：mammoth 需要 Node Buffer，而不是 ArrayBuffer
         const arrayBuffer = await file.arrayBuffer();
+        // ✅ 关键修复：转换成 Node.js Buffer
         const buffer = Buffer.from(arrayBuffer);
         const { value } = await mammoth.extractRawText({ buffer });
         text = value;
@@ -104,6 +104,7 @@ export async function POST(req: Request) {
         );
       }
     }
+
 
 
     // ✅ 其他类型提示
