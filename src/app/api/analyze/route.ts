@@ -90,9 +90,10 @@ export async function POST(req: Request) {
     // ✅ 新增：Word (.docx) 文件解析
     else if (file.name.toLowerCase().endsWith(".docx")) {
       try {
-        // 👇 关键修改：使用原生 arrayBuffer，而不是 Node Buffer
+        // 👇 修复：mammoth 需要 Node Buffer，而不是 ArrayBuffer
         const arrayBuffer = await file.arrayBuffer();
-        const { value } = await mammoth.extractRawText({ buffer: arrayBuffer });
+        const buffer = Buffer.from(arrayBuffer);
+        const { value } = await mammoth.extractRawText({ buffer });
         text = value;
         console.log("✅ Word 文件解析成功, 字符数:", text.length);
       } catch (err) {
@@ -103,6 +104,7 @@ export async function POST(req: Request) {
         );
       }
     }
+
 
     // ✅ 其他类型提示
     else {
