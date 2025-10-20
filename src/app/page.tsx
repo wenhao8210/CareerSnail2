@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
-import AnalyzingTips from "@/components/AnalyzingTips";
-import AnalysisPanel from "@/components/AnalysisPanel";
+import AnalyzingTips from "./components/AnalyzingTips";
+import AnalysisPanel from "./components/AnalysisPanel";
+
 
 
 function NeonSearchBar({

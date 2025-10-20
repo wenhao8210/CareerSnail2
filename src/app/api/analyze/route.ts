@@ -7,10 +7,19 @@ import PDFParser from "pdf2json";
 import { createClient } from "@supabase/supabase-js";
 import { addRecord, calculateRank } from "@/utils/recordStore";
 
+// === 全局错误捕获 ===
+process.on("uncaughtException", (err) => {
+  console.error("💥 未捕获异常:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 未处理的 Promise 拒绝:", reason);
+});
+
 console.log("🐌 [SERVER INIT] Runtime:", process.env.NODE_ENV);
 console.log("🐌 [SERVER INIT] Has OPENAI key:", !!process.env.OPENAI_API_KEY);
 console.log("🐌 [SERVER INIT] Has SUPABASE URL:", !!process.env.SUPABASE_URL);
 console.log("🐌 [SERVER INIT] Has SUPABASE ROLE:", !!process.env.SUPABASE_SERVICE_ROLE);
+
 
 
 // ✅ 初始化 Supabase 客户端
@@ -180,31 +189,49 @@ ${text}
 
 
 
+    console.log("🟢 [Step 10] 开始调用 OpenAI API");
+
     const completion = await client.responses.create({
       model: "gpt-5",
       input: prompt,
     });
 
     const result = completion.output_text || "AI 未返回结果";
-    // ✅ 解析 AI 输出中的综合匹配度
-    const score = JSON.parse(result)["综合匹配度"];
+    console.log("🟢 [Step 11] AI 分析完成, 输出长度:", result.length);
 
-    // ✅ 写入日志（异步）
-    await addRecord(target_role as string, score);
+    // === 解析评分 ===
+    let score = 0;
+    try {
+      score = JSON.parse(result)["综合匹配度"];
+    } catch (e) {
+      console.error("⚠️ [Step 12] JSON 解析失败，AI 输出非标准格式:", e);
+    }
+    console.log("🟢 [Step 13] 提取匹配度分数:", score);
 
-    // ✅ 计算全局排名（异步）
-    const { rankPercent, total } = await calculateRank(score);
+    // === 写入数据库并计算排名 ===
+    try {
+      await addRecord(target_role as string, score);
+      console.log("🟢 [Step 14] addRecord 写入成功");
 
+      const { rankPercent, total } = await calculateRank(score);
+      console.log("🟢 [Step 15] calculateRank 计算成功:", { rankPercent, total });
 
-    return NextResponse.json({
-      analysis: result,
-      resumeText: text,
-      rankPercent,
-      total,
-      fileUrl,
-    });
+      return NextResponse.json({
+        analysis: result,
+        resumeText: text,
+        rankPercent,
+        total,
+        fileUrl,
+      });
+    } catch (dbErr) {
+      console.error("❌ [DB ERROR] Supabase 写入或查询失败:", dbErr);
+      return NextResponse.json(
+        { error: "Supabase 写入失败，请检查数据库连接" },
+        { status: 500 }
+      );
+    }
   } catch (err: any) {
-    console.error("❌ 服务器错误:", err);
+    console.error("❌ [SERVER ERROR] 捕获异常:", err);
     return NextResponse.json(
       { error: err.message || "服务器内部错误" },
       { status: 500 }
