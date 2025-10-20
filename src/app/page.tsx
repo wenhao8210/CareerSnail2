@@ -131,7 +131,7 @@ export default function Home() {
   return (
     <main className="relative min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-950 to-black text-white overflow-hidden">
       {/* 🧭 新增：问号宝箱固定在右上角 */}
-      <div className="fixed top-6 right-6 z-50">
+      <div className="fixed top-66 left-1/2 -translate-x-1/2 z-50">
         <ButtonTreasure />
       </div>
 
@@ -143,18 +143,15 @@ export default function Home() {
       {/* ⚡️前景内容包裹层 */}
       <div className="relative z-10 flex flex-col items-center"></div>
 
-      {/* 顶部品牌标题 */}
-      <h1 className="text-3xl font-bold mb-6 text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 text-center">
+      {/* 顶部标题 */}
+      <h1 className="text-3xl font-bold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 text-center">
         🐌 SNAIL CAREER｜蜗牛简历，一毫米也算前进
       </h1>
 
-
-      {/* 功能引导区 */}
-      <div className="text-center mb-10">
-        <h2 className="text-xl font-semibold mb-2 text-white">
-          3分钟 快速评估：多久能收到面试邀约
-        </h2>
-      </div>
+      {/* 副标题 */}
+      <p className="text-center text-white text-lg mb-8">
+        3分钟 快速评估：多久能收到面试邀约
+      </p>
       <div className="h-60" /> {/* spacer: 底部与版权之间 40px */}
 
 
