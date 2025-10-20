@@ -125,7 +125,16 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-black text-white p-10 relative overflow-hidden">
+    <main className="relative min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-950 to-black text-white overflow-hidden">
+      {/* === 顶部右上角按钮 === */}
+      <button
+        onClick={() =>
+          alert("🚧 新功能开发中：简历填写插件与面试题库即将上线！")
+        }
+        className="absolute top-6 right-6 px-4 py-2 bg-black/40 border border-gray-700 rounded-xl text-sm text-gray-300 hover:text-purple-300 hover:border-purple-400 transition backdrop-blur-sm"
+      >
+        ✨ 敬请期待：简历填写插件 | 面试题库
+      </button>
       {/* 赛博网格背景 */}
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(100,0,255,0.05)_0%,transparent_70%)]"></div>
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:40px_40px]"></div>
