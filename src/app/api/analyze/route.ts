@@ -7,9 +7,10 @@ import PDFParser from "pdf2json";
 import { createClient } from "@supabase/supabase-js";
 import { addRecord, calculateRank } from "@/utils/recordStore";
 
-console.log("🧩 [DEBUG] Runtime:", process.env.NODE_ENV);
-console.log("🧩 [DEBUG] Has key:", !!process.env.OPENAI_API_KEY);
-console.log("🧩 [DEBUG] Key prefix:", process.env.OPENAI_API_KEY?.slice(0, 10) || "undefined");
+console.log("🐌 [SERVER INIT] Runtime:", process.env.NODE_ENV);
+console.log("🐌 [SERVER INIT] Has OPENAI key:", !!process.env.OPENAI_API_KEY);
+console.log("🐌 [SERVER INIT] Has SUPABASE URL:", !!process.env.SUPABASE_URL);
+console.log("🐌 [SERVER INIT] Has SUPABASE ROLE:", !!process.env.SUPABASE_SERVICE_ROLE);
 
 
 // ✅ 初始化 Supabase 客户端
@@ -87,10 +88,13 @@ export async function POST(req: Request) {
     }
 
     // ✅ 新增：Word (.docx) 文件解析
-    else if (file.name.endsWith(".docx")) {
+    else if (file.name.toLowerCase().endsWith(".docx")) {
       try {
-        const { value } = await mammoth.extractRawText({ buffer });
+        // 👇 关键修改：使用原生 arrayBuffer，而不是 Node Buffer
+        const arrayBuffer = await file.arrayBuffer();
+        const { value } = await mammoth.extractRawText({ buffer: arrayBuffer });
         text = value;
+        console.log("✅ Word 文件解析成功, 字符数:", text.length);
       } catch (err) {
         console.error("❌ Word 文件解析失败:", err);
         return NextResponse.json(
