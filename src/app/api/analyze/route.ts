@@ -189,11 +189,12 @@ ${text}
     // ✅ 解析 AI 输出中的综合匹配度
     const score = JSON.parse(result)["综合匹配度"];
 
-    // ✅ 写入日志
-    addRecord(target_role as string, score);
+    // ✅ 写入日志（异步）
+    await addRecord(target_role as string, score);
 
-    // ✅ 计算全局排名
-    const { rankPercent, total } = calculateRank(score);
+    // ✅ 计算全局排名（异步）
+    const { rankPercent, total } = await calculateRank(score);
+
 
     return NextResponse.json({
       analysis: result,
