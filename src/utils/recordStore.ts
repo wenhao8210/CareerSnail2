@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ 初始化 Supabase 客户端
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE!
@@ -26,7 +25,7 @@ export async function addRecord(role: string, score: number) {
   }
 }
 
-// ✅ 计算排名（基于数据库）
+// ✅ 计算排名
 export async function calculateRank(score: number) {
   try {
     const { data, error } = await supabase.from("records").select("score");
@@ -39,6 +38,7 @@ export async function calculateRank(score: number) {
     const better = data.filter((r) => r.score > score).length;
     const rankPercent = total > 0 ? ((total - better) / total) * 100 : 0;
 
+    console.log("✅ Supabase 排名计算:", { total, rankPercent });
     return { rankPercent, total };
   } catch (err) {
     console.error("❌ Supabase 查询异常:", err);
