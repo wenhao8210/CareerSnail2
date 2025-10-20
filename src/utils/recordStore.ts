@@ -5,43 +5,35 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE!
 );
 
-// ✅ 写入记录
+// ✅ 写入新记录
 export async function addRecord(role: string, score: number) {
-  try {
-    const { error } = await supabase.from("records").insert([
-      {
-        role,
-        score,
-        created_at: new Date().toISOString(),
-      },
-    ]);
-    if (error) {
-      console.error("❌ Supabase 写入失败:", error.message);
-    } else {
-      console.log("✅ Supabase 写入成功:", { role, score });
-    }
-  } catch (err) {
-    console.error("❌ Supabase 写入异常:", err);
+  console.log("🧾 [LOG] Writing to Supabase:", role, score);
+  const { data, error } = await supabase
+    .from("records")
+    .insert([{ role, score }]);
+
+  if (error) {
+    console.error("❌ [Supabase Insert Error]:", error);
+  } else {
+    console.log("✅ [Supabase Inserted]:", data);
   }
 }
 
-// ✅ 计算排名
+// ✅ 计算全局排名
 export async function calculateRank(score: number) {
-  try {
-    const { data, error } = await supabase.from("records").select("score");
-    if (error || !data) {
-      console.error("❌ Supabase 查询失败:", error?.message);
-      return { rankPercent: 0, total: 0 };
-    }
+  const { data, error } = await supabase
+    .from("records")
+    .select("score");
 
-    const total = data.length;
-    const better = data.filter((r) => r.score > score).length;
-    const rankPercent = total > 0 ? ((total - better) / total) * 100 : 0;
-
-    console.log("✅ Supabase 排名计算:", { total, rankPercent });
-    return { rankPercent, total };
-  } catch (err) {
-    console.error("❌ Supabase 查询异常:", err);
+  if (error || !data) {
+    console.error("❌ [Supabase Fetch Error]:", error);
     return { rankPercent: 0, total: 0 };
   }
+
+  const total = data.length;
+  const better = data.filter((r) => r.score > score).length;
+  const rankPercent = total > 0 ? ((total - better) / total) * 100 : 0;
+
+  console.log(`📊 [Rank] total=${total}, rank=${rankPercent.toFixed(1)}%`);
+  return { rankPercent, total };
 }
