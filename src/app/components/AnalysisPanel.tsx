@@ -17,9 +17,9 @@ function AnalysisPanel({ data }: { data: any }) {
   const labels = [
     "教育背景",
     "实习与项目经验",
-    "技能与工具掌握",
-    "表达与逻辑清晰度",
+    "项目描述",
     "成就与量化指标",
+    "荣誉与闪光点",
   ];
 
   return (
@@ -49,32 +49,35 @@ function AnalysisPanel({ data }: { data: any }) {
 
       {/* 维度分数条 */}
       <div className="space-y-4">
-        {labels.map((label) => (
-          <div key={label}>
-            <div className="flex justify-between text-sm font-medium mb-2">
-              <span>{label}</span>
-              <span>{data[label].toFixed(1)}/5</span>
+        {labels.map((label) => {
+          const value = typeof data[label] === "number" ? data[label] : 0;
+          return (
+            <div key={label}>
+              <div className="flex justify-between text-sm font-medium mb-2">
+                <span>{label}</span>
+                <span>{value.toFixed(1)}/5</span>
+              </div>
+              <div className="w-full bg-gray-800 rounded-full h-2">
+                <div
+                  className="bg-gradient-to-r from-green-400 to-emerald-500 h-2 rounded-full transition-all"
+                  style={{ width: `${(value / 5) * 100}%` }}
+                />
+              </div>
             </div>
-            <div className="w-full bg-gray-800 rounded-full h-2">
-              <div
-                className="bg-gradient-to-r from-green-400 to-emerald-500 h-2 rounded-full transition-all"
-                style={{ width: `${(data[label] / 5) * 100}%` }}
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* 综合匹配度 */}
       <div className="mt-6">
         <div className="flex justify-between text-sm font-medium mb-1">
           <span>综合匹配度</span>
-          <span>{data["综合匹配度"].toFixed(1)}/10</span>
+          <span>{(typeof data["综合匹配度"] === "number" ? data["综合匹配度"] : 0).toFixed(1)}/10</span>
         </div>
         <div className="w-full bg-gray-800 rounded-full h-2">
           <div
             className="bg-gradient-to-r from-blue-400 to-cyan-500 h-2 rounded-full transition-all"
-            style={{ width: `${(data["综合匹配度"] / 10) * 100}%` }}
+            style={{ width: `${((typeof data["综合匹配度"] === "number" ? data["综合匹配度"] : 0) / 10) * 100}%` }}
           />
         </div>
       </div>
@@ -82,7 +85,7 @@ function AnalysisPanel({ data }: { data: any }) {
       {/* 简历总结 */}
       <div className="mt-8 leading-relaxed">
         <p className="font-semibold mb-2 text-purple-300">📋 简历总结</p>
-        <p className="text-gray-300">{data["简历总结"]}</p>
+        <p className="text-gray-300">{data["简历总结"] ?? ""}</p>
       </div>
 
       
