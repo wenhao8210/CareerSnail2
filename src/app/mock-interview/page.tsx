@@ -14,9 +14,11 @@ import {
   Sparkles,
   Heart,
   ArrowLeft,
+  Minimize2,
+  Maximize2,
 } from "lucide-react";
 import ButtonTreasure from "@/app/components/ButtonTreasure";
-import { QUESTION_BANK } from "@/lib/mock-interview/questionBank";
+import { QUESTION_BANK, AI_PM_QUESTION_BANK } from "@/lib/mock-interview/questionBank";
 import { generatePrompt, RESUME_CONTENT } from "@/lib/mock-interview/prompts";
 import "./mock-interview.css";
 
@@ -39,11 +41,11 @@ const TUTORIAL_STEPS: { title: string; body: string }[] = [
   },
   {
     title: "Step 3 · 创建题库",
-    body: "点击顶栏「创建题库」，根据自己的岗位、JD 和简历创建专属题库，生成约需等待 2 分钟。",
+    body: "点击下方「创建题库」，根据自己的岗位、JD 和简历创建专属题库，生成约需等待 2 分钟。",
   },
   {
     title: "Step 4 · 切换与生成新题",
-    body: "在顶栏可切换不同题库；点击「生成新题」可为当前题库追加新题目。",
+    body: "在下方可切换不同题库；点击「生成新题」可为当前题库追加新题目。",
   },
 ];
 
@@ -86,12 +88,12 @@ interface Project {
 }
 
 const defaultProject: Project = {
-  id: "default_yizhanshi",
-  name: "一站式剧本演绎",
+  id: "default_ai_pm",
+  name: "AI产品经理通用题库",
   jd: "AI产品经理（通用要求）：\n- 负责AI产品的规划、设计和迭代\n- 深入理解AI技术能力边界，能够将技术能力转化为产品价值\n- 具备数据分析和用户研究能力\n- 能够跨团队协作，推动产品落地\n- 关注用户体验和商业价值平衡",
   resume: RESUME_CONTENT,
-  questions: QUESTION_BANK.slice(0, 10).map((q, idx) => ({
-    id: q.id || `default_q_${idx}`,
+  questions: AI_PM_QUESTION_BANK.map((q, idx) => ({
+    id: q.id || `ai_pm_q_${idx}`,
     category: q.category || "通用",
     question: q.question,
     answer: q.answer,
@@ -135,8 +137,8 @@ async function generateQuestionsWithAI(
 export default function MockInterviewPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingMinimized, setIsGeneratingMinimized] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
   const [estimatedTimeRemaining, setEstimatedTimeRemaining] = useState(300);
   const [likeCount, setLikeCount] = useState(0);
@@ -145,20 +147,25 @@ export default function MockInterviewPage() {
   const [projectName, setProjectName] = useState("");
   const [jdContent, setJdContent] = useState("");
   const [resumeContent, setResumeContent] = useState("");
-  const [currentQuestions, setCurrentQuestions] = useState<QuestionItem[]>(() => QUESTION_BANK.slice(0, 10).map((q, i) => ({ ...q, id: q.id || `q_${i}` })));
+  const [currentQuestions, setCurrentQuestions] = useState<QuestionItem[]>(() => AI_PM_QUESTION_BANK.map((q, i) => ({ ...q, id: q.id || `q_${i}` })));
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [mistakes, setMistakes] = useState<Record<string, (QuestionItem & { timestamp?: Date })[]>>({});
-  const [view, setView] = useState<"card" | "mistakes">("card");
+  const [view, setView] = useState<"card" | "create" | "mistakes" | "generate">("card");
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
   const [isEditingCard, setIsEditingCard] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [editingMistakeId, setEditingMistakeId] = useState<string | number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showAddQuestionModal, setShowAddQuestionModal] = useState(false);
+  const [addQuestionCategory, setAddQuestionCategory] = useState("");
+  const [addQuestionQuestion, setAddQuestionQuestion] = useState("");
+  const [addQuestionAnswer, setAddQuestionAnswer] = useState("");
   const [tutorialStep, setTutorialStep] = useState(1);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialTipPos, setTutorialTipPos] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const prevProjectIdRef = useRef<string | null>(null);
   const tutorialCardRef = useRef<HTMLDivElement>(null);
   const tutorialActionsRef = useRef<HTMLDivElement>(null);
   const tutorialCreateRef = useRef<HTMLButtonElement>(null);
@@ -258,8 +265,12 @@ export default function MockInterviewPage() {
     if (currentProjectId) {
       const p = projects.find((x) => x.id === currentProjectId);
       if (p?.questions?.length) {
-        setCurrentQuestions(p.questions.slice(0, 10));
-        setCurrentIndex(0);
+        setCurrentQuestions(p.questions);
+        const isProjectSwitch = prevProjectIdRef.current !== currentProjectId;
+        if (isProjectSwitch) {
+          prevProjectIdRef.current = currentProjectId;
+          setCurrentIndex(0);
+        }
       }
     }
   }, [currentProjectId, projects]);
@@ -283,6 +294,7 @@ export default function MockInterviewPage() {
       return;
     }
     setIsGenerating(true);
+    setIsGeneratingMinimized(false);
     setGenerationProgress(10);
     setEstimatedTimeRemaining(300);
     setLikeCount(0);
@@ -317,7 +329,7 @@ export default function MockInterviewPage() {
       setCurrentQuestions(newProject.questions.slice(0, 10));
       setCurrentIndex(0);
       setMistakes((prev) => ({ ...prev, [newProject.id]: [] }));
-      setShowCreateModal(false);
+      setView("card");
       setProjectName("");
       setJdContent("");
       setResumeContent("");
@@ -393,6 +405,36 @@ export default function MockInterviewPage() {
     }
   };
 
+  const handleAddQuestion = () => {
+    const category = addQuestionCategory.trim() || "通用";
+    const question = addQuestionQuestion.trim();
+    const answer = addQuestionAnswer.trim();
+    if (!question) {
+      alert("请至少填写题目内容");
+      return;
+    }
+    const newQ: QuestionItem = {
+      id: `manual_${Date.now()}`,
+      category,
+      question,
+      answer: answer || "（暂无参考答案，可翻转后自行填写）",
+    };
+    setProjects((prev) =>
+      prev.map((p) =>
+        p.id === currentProjectId
+          ? { ...p, questions: [...(p.questions || []), newQ] }
+          : p
+      )
+    );
+    setCurrentQuestions((prev) => [...prev, newQ]);
+    setCurrentIndex(currentQuestions.length);
+    setShowAddQuestionModal(false);
+    setAddQuestionCategory("");
+    setAddQuestionQuestion("");
+    setAddQuestionAnswer("");
+    setIsFlipped(false);
+  };
+
   const handleGenerateMore = async () => {
     const p = projects.find((x) => x.id === currentProjectId);
     if (!p?.jd?.trim() || !p?.resume?.trim()) {
@@ -400,6 +442,7 @@ export default function MockInterviewPage() {
       return;
     }
     setIsGenerating(true);
+    setIsGeneratingMinimized(false);
     setGenerationProgress(10);
     setEstimatedTimeRemaining(300);
     setLikeCount(0);
@@ -419,6 +462,7 @@ export default function MockInterviewPage() {
         question: q.question,
         answer: q.answer,
       }));
+      const prevLen = p.questions?.length ?? 0;
       setProjects((prev) =>
         prev.map((proj) =>
           proj.id === currentProjectId
@@ -426,8 +470,7 @@ export default function MockInterviewPage() {
             : proj
         )
       );
-      setCurrentQuestions(mapped.slice(0, 10));
-      setCurrentIndex(0);
+      setCurrentIndex(prevLen);
       setIsFlipped(false);
       setGenerationProgress(100);
       setEstimatedTimeRemaining(0);
@@ -467,53 +510,30 @@ export default function MockInterviewPage() {
           <ButtonTreasure />
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
-          <button
-            ref={tutorialCreateRef}
-            onClick={() => setShowCreateModal(true)}
-            className="px-3 py-1.5 rounded-full text-sm font-medium bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white flex items-center gap-1 hover:brightness-110 transition"
-          >
-            <Sparkles className="w-4 h-4" /> 创建题库
-          </button>
-          <button
-            onClick={() => setView("mistakes")}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium ${view === "mistakes" ? "bg-rose-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
-          >
-            <Book className="w-4 h-4" /> 错题本 ({currentMistakes.length})
-          </button>
-          {view === "card" && (
-            <button
-              onClick={handleGenerateMore}
-              disabled={isGenerating}
-              className="px-3 py-1.5 rounded-full text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 disabled:opacity-70 disabled:cursor-not-allowed transition"
-              title="AI 生成新10道题"
-            >
-              {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              生成新题
-            </button>
-          )}
           <div className="relative" ref={menuRef}>
             <button
               type="button"
               onClick={() => setMenuOpen((o) => !o)}
-              className="p-2 rounded-lg text-gray-400 hover:text-purple-400 hover:bg-white/5 transition"
+              className={`flex items-center gap-2 px-3 py-2 rounded-full border font-medium text-sm transition ${menuOpen ? "border-purple-400 bg-purple-500/20 text-purple-300" : "border-purple-400/50 text-purple-300/90 hover:border-purple-400 hover:bg-purple-500/10"}`}
               aria-label="打开菜单"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <span className="hidden sm:inline">简历 · 面试</span>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
               </svg>
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-full mt-1 py-1 min-w-[140px] rounded-lg bg-gray-900/95 border border-gray-700 shadow-xl z-50">
+              <div className="absolute right-0 top-full mt-2 py-1.5 min-w-[160px] rounded-xl bg-black/95 border-2 border-purple-400/50 shadow-xl shadow-purple-500/20 z-50">
                 <a
                   href="/"
-                  className="block px-4 py-2.5 text-sm text-gray-200 hover:bg-white/5 hover:text-purple-400 transition"
+                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-t-xl"
                   onClick={() => setMenuOpen(false)}
                 >
                   简历优化
                 </a>
                 <a
                   href="/mock-interview"
-                  className="block px-4 py-2.5 text-sm text-purple-400 font-medium bg-purple-500/10 transition"
+                  className="block px-4 py-3 text-sm font-medium text-purple-400 bg-purple-500/15 hover:bg-purple-500/25 transition rounded-b-xl"
                   onClick={() => setMenuOpen(false)}
                 >
                   模拟面试
@@ -525,7 +545,7 @@ export default function MockInterviewPage() {
       </header>
 
       {/* 首次使用教程：提示框在对应按键上方，无定位时用底部居中兜底 */}
-      {showTutorial && view === "card" && (
+      {showTutorial && (view === "card" || view === "create") && (
         <div className="fixed inset-0 z-[9999] pointer-events-none">
           <div
             ref={tutorialTipRef}
@@ -586,57 +606,89 @@ export default function MockInterviewPage() {
           </button>
       </div>
 
-      {showCreateModal && !isGenerating && (
+      {/* View stack：刷题卡片 | 创建题库 | 错题本 | 生成新题 */}
+      <div className="relative z-10 px-4 py-2 border-b border-purple-500/20 bg-black/30 flex items-center gap-2 flex-wrap">
+        <button
+          onClick={() => setView("card")}
+          className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${view === "card" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+        >
+          刷题卡片
+        </button>
+        <button
+          ref={tutorialCreateRef}
+          onClick={() => setView("create")}
+          className={`px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-1 transition ${view === "create" ? "bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+        >
+          <Sparkles className="w-4 h-4" /> 创建题库
+        </button>
+        <button
+          onClick={() => setView("mistakes")}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition ${view === "mistakes" ? "bg-rose-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+        >
+          <Book className="w-4 h-4" /> 错题本 ({currentMistakes.length})
+        </button>
+        <button
+          onClick={() => setView("generate")}
+          disabled={isGenerating}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition disabled:opacity-70 disabled:cursor-not-allowed ${view === "generate" ? "bg-emerald-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+          title="AI 生成新10道题"
+        >
+          {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          生成新题
+        </button>
+      </div>
+
+      {showAddQuestionModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-black/80 rounded-2xl border border-purple-500/20 shadow-2xl shadow-purple-500/10 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-purple-500/20 flex justify-between items-center">
               <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-purple-400" /> 创建新题库
+                <Plus className="w-5 h-5 text-amber-400" /> 手动添加题目
               </h2>
-              <button onClick={() => setShowCreateModal(false)} className="p-2 hover:bg-white/5 rounded-full text-gray-400 hover:text-purple-400 transition">
+              <button onClick={() => setShowAddQuestionModal(false)} className="p-2 hover:bg-white/5 rounded-full text-gray-400 hover:text-purple-400 transition">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">项目名称 *</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">分类（选填）</label>
                 <input
                   type="text"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="例如：百度AI产品经理面试"
+                  value={addQuestionCategory}
+                  onChange={(e) => setAddQuestionCategory(e.target.value)}
+                  placeholder="例如：简历深挖、策略优化"
                   className="w-full bg-black/60 text-gray-100 px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">JD（职位描述） *</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">题目 *</label>
                 <textarea
-                  value={jdContent}
-                  onChange={(e) => setJdContent(e.target.value)}
-                  placeholder="请输入职位描述..."
-                  rows={6}
+                  value={addQuestionQuestion}
+                  onChange={(e) => setAddQuestionQuestion(e.target.value)}
+                  placeholder="输入面试题目..."
+                  rows={4}
                   className="w-full bg-black/60 text-gray-100 px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50 resize-none"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">我的简历内容 *</label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">参考答案（选填）</label>
                 <textarea
-                  value={resumeContent}
-                  onChange={(e) => setResumeContent(e.target.value)}
-                  placeholder="请输入你的简历内容..."
-                  rows={8}
+                  value={addQuestionAnswer}
+                  onChange={(e) => setAddQuestionAnswer(e.target.value)}
+                  placeholder="输入参考答案或思路，可留空后翻转再填"
+                  rows={6}
                   className="w-full bg-black/60 text-gray-100 px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50 resize-none"
                 />
               </div>
               <div className="flex gap-3 pt-4">
-                <button onClick={() => setShowCreateModal(false)} className="flex-1 px-4 py-2 bg-black/60 hover:bg-gray-800 text-gray-200 rounded-lg border border-gray-700 hover:border-gray-600 transition">
+                <button onClick={() => setShowAddQuestionModal(false)} className="flex-1 px-4 py-2 bg-black/60 hover:bg-gray-800 text-gray-200 rounded-lg border border-gray-700 hover:border-gray-600 transition">
                   取消
                 </button>
                 <button
-                  onClick={handleCreateProject}
-                  className="flex-1 px-4 py-2 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white rounded-lg flex items-center justify-center gap-2 font-semibold hover:brightness-110 transition"
+                  onClick={handleAddQuestion}
+                  className="flex-1 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg flex items-center justify-center gap-2 font-semibold transition"
                 >
-                  <Sparkles className="w-4 h-4" /> 生成题库
+                  <Plus className="w-4 h-4" /> 添加到当前题库
                 </button>
               </div>
             </div>
@@ -645,28 +697,69 @@ export default function MockInterviewPage() {
       )}
 
       {isGenerating && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-black/80 rounded-2xl border border-purple-500/30 shadow-2xl shadow-purple-500/20 p-8 max-w-lg w-full">
-            <div className="flex flex-col items-center space-y-6">
-              <RefreshCw className="w-16 h-16 text-purple-400 animate-spin" />
-              <h3 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400">正在生成题库</h3>
-              <p className="text-gray-400 text-sm">预计剩余：{Math.floor(estimatedTimeRemaining / 60)}分{estimatedTimeRemaining % 60}秒</p>
-              <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-                <div className="bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 h-full rounded-full transition-all" style={{ width: `${generationProgress}%` }} />
-              </div>
-              <div className="w-full border-t border-slate-700 pt-6">
-                <p className="text-slate-300 text-sm mb-2">💡 点击点赞可以加速生成（彩蛋）</p>
-                <button onClick={handleLikeClick} className="like-btn">
-                  <div className="leftContainer">
-                    <Heart className="w-4 h-4 text-white fill-white" />
-                    <span className="like">点赞</span>
+        <>
+          {isGeneratingMinimized ? (
+            <div className="fixed bottom-6 right-6 z-[60]">
+              <div className="bg-black/90 rounded-xl border border-purple-500/30 shadow-2xl p-4 min-w-[200px]">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
+                    <span className="text-sm font-medium text-gray-200">生成中...</span>
                   </div>
-                  <div className="likeCount"><span>{likeCount}</span></div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsGeneratingMinimized(false)}
+                    className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-purple-400 transition"
+                    title="展开"
+                  >
+                    <Maximize2 className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-1.5 overflow-hidden mb-2">
+                  <div
+                    className="bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 h-full rounded-full transition-all"
+                    style={{ width: `${generationProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400">
+                  {Math.floor(estimatedTimeRemaining / 60)}分{estimatedTimeRemaining % 60}秒
+                  {likeCount > 0 && ` · ${likeCount}👍`}
+                </p>
               </div>
             </div>
-          </div>
-        </div>
+          ) : (
+            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+              <div className="bg-black/80 rounded-2xl border border-purple-500/30 shadow-2xl shadow-purple-500/20 p-8 max-w-lg w-full relative">
+                <button
+                  type="button"
+                  onClick={() => setIsGeneratingMinimized(true)}
+                  className="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-lg text-gray-400 hover:text-purple-400 transition"
+                  title="最小化到后台"
+                >
+                  <Minimize2 className="w-5 h-5" />
+                </button>
+                <div className="flex flex-col items-center space-y-6">
+                  <RefreshCw className="w-16 h-16 text-purple-400 animate-spin" />
+                  <h3 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400">正在生成题库</h3>
+                  <p className="text-gray-400 text-sm">预计剩余：{Math.floor(estimatedTimeRemaining / 60)}分{estimatedTimeRemaining % 60}秒</p>
+                  <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
+                    <div className="bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 h-full rounded-full transition-all" style={{ width: `${generationProgress}%` }} />
+                  </div>
+                  <div className="w-full border-t border-slate-700 pt-6">
+                    <p className="text-slate-300 text-sm mb-2">💡 点击点赞可以加速生成（彩蛋）</p>
+                    <button onClick={handleLikeClick} className="like-btn">
+                      <div className="leftContainer">
+                        <Heart className="w-4 h-4 text-white fill-white" />
+                        <span className="like">点赞</span>
+                      </div>
+                      <div className="likeCount"><span>{likeCount}</span></div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <main className="relative z-10 max-w-md mx-auto p-4 flex-1 flex flex-col justify-center w-full">
@@ -761,24 +854,97 @@ export default function MockInterviewPage() {
             </div>
 
             {!isEditingCard && (
-              <div ref={tutorialActionsRef} className="grid grid-cols-2 gap-4">
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleNext("wrong"); }}
-                  className="group flex flex-col items-center justify-center p-4 rounded-xl bg-black/60 hover:bg-rose-900/20 border border-gray-700 hover:border-rose-500/50 transition"
-                >
-                  <X className="w-6 h-6 text-rose-500 mb-1" />
-                  <span className="text-sm font-medium text-gray-400 group-hover:text-rose-400 transition">模糊 / 不会</span>
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleNext("correct"); }}
-                  className="group flex flex-col items-center justify-center p-4 rounded-xl bg-black/60 hover:bg-emerald-900/20 border border-gray-700 hover:border-emerald-500/50 transition"
-                >
-                  <Check className="w-6 h-6 text-emerald-500 mb-1" />
-                  <span className="text-sm font-medium text-gray-400 group-hover:text-emerald-400 transition">掌握了</span>
-                </button>
-              </div>
+              <>
+                <div ref={tutorialActionsRef} className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleNext("wrong"); }}
+                    className="group flex flex-col items-center justify-center p-4 rounded-xl bg-black/60 hover:bg-rose-900/20 border border-gray-700 hover:border-rose-500/50 transition"
+                  >
+                    <X className="w-6 h-6 text-rose-500 mb-1" />
+                    <span className="text-sm font-medium text-gray-400 group-hover:text-rose-400 transition">模糊 / 不会</span>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleNext("correct"); }}
+                    className="group flex flex-col items-center justify-center p-4 rounded-xl bg-black/60 hover:bg-emerald-900/20 border border-gray-700 hover:border-emerald-500/50 transition"
+                  >
+                    <Check className="w-6 h-6 text-emerald-500 mb-1" />
+                    <span className="text-sm font-medium text-gray-400 group-hover:text-emerald-400 transition">掌握了</span>
+                  </button>
+                </div>
+                <div className="mt-3 flex justify-center">
+                  <button
+                    onClick={() => setShowAddQuestionModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium bg-amber-600/90 hover:bg-amber-500 text-white transition"
+                    title="在题库中手动添加一道题"
+                  >
+                    <Plus className="w-4 h-4" /> 手动加题
+                  </button>
+                </div>
+              </>
             )}
           </>
+        ) : view === "create" ? (
+          <div className="w-full max-w-2xl mx-auto py-6 space-y-4">
+            <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-purple-400" /> 创建新题库
+            </h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">项目名称 *</label>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="例如：百度AI产品经理面试"
+                className="w-full bg-black/60 text-gray-100 px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">JD（职位描述） *</label>
+              <textarea
+                value={jdContent}
+                onChange={(e) => setJdContent(e.target.value)}
+                placeholder="请输入职位描述..."
+                rows={6}
+                className="w-full bg-black/60 text-gray-100 px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50 resize-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">我的简历内容 *</label>
+              <textarea
+                value={resumeContent}
+                onChange={(e) => setResumeContent(e.target.value)}
+                placeholder="请输入你的简历内容..."
+                rows={8}
+                className="w-full bg-black/60 text-gray-100 px-4 py-2 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50 resize-none"
+              />
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button onClick={() => setView("card")} className="flex-1 px-4 py-2 bg-black/60 hover:bg-gray-800 text-gray-200 rounded-lg border border-gray-700 hover:border-gray-600 transition">
+                取消
+              </button>
+              <button
+                onClick={handleCreateProject}
+                className="flex-1 px-4 py-2 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white rounded-lg flex items-center justify-center gap-2 font-semibold hover:brightness-110 transition"
+              >
+                <Sparkles className="w-4 h-4" /> 生成题库
+              </button>
+            </div>
+          </div>
+        ) : view === "generate" ? (
+          <div className="w-full max-w-md mx-auto py-8 flex flex-col items-center text-center">
+            <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 mb-2 flex items-center justify-center gap-2">
+              <Sparkles className="w-5 h-5 text-emerald-400" /> 生成新题
+            </h2>
+            <p className="text-gray-400 text-sm mb-6">基于当前题库的 JD 与简历，由 AI 为当前项目追加约 10 道新题。</p>
+            <button
+              onClick={handleGenerateMore}
+              disabled={isGenerating}
+              className="px-6 py-3 rounded-full text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed transition"
+            >
+              {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              为当前题库 AI 生成新 10 道题
+            </button>
+          </div>
         ) : (
           <div className="flex flex-col h-full">
             <div className="flex justify-between items-center mb-4">

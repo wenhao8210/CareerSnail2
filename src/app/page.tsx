@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import AnalyzingTips from "./components/AnalyzingTips";
 import AnalysisPanel from "./components/AnalysisPanel";
 import ButtonTreasure from "./components/ButtonTreasure";
+import HistoryChart from "./components/HistoryChart";
+import { getHistory, appendToHistory, maskRoleName, type AnalysisRecord } from "@/lib/historyStorage";
 
 
 
@@ -76,7 +78,17 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mainTab, setMainTab] = useState<"analyze" | "history">("analyze");
+  const [historyRecords, setHistoryRecords] = useState<AnalysisRecord[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setHistoryRecords(getHistory());
+  }, []);
+
+  useEffect(() => {
+    if (mainTab === "history") setHistoryRecords(getHistory());
+  }, [mainTab]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -132,13 +144,24 @@ export default function Home() {
 
       // ✅ 保存 AI 分析 + 排名信息
       setResumeText(data.resumeText);
+      const analysis = JSON.parse(data.analysis);
       setResult(
         JSON.stringify({
-          ...JSON.parse(data.analysis),
+          ...analysis,
           rankPercent: data.rankPercent,
           total: data.total,
         })
       );
+      // ✅ 写入本地历史，供折线图展示
+      const score = typeof analysis["综合匹配度"] === "number" ? analysis["综合匹配度"] : 0;
+      appendToHistory({
+        role: targetRole?.trim() || "未指定岗位",
+        score,
+        date: new Date().toISOString(),
+        rankPercent: data.rankPercent,
+        total: data.total,
+      });
+      setHistoryRecords(getHistory());
     } catch (err) {
       console.error("❌ 上传出错:", err);
       alert("上传过程中出现错误，请检查网络或重试。");
@@ -161,25 +184,26 @@ export default function Home() {
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
-            className="p-2 rounded-lg text-gray-400 hover:text-purple-400 hover:bg-white/5 transition"
+            className={`flex items-center gap-2 px-3 py-2 rounded-full border font-medium text-sm transition ${menuOpen ? "border-purple-400 bg-purple-500/20 text-purple-300" : "border-purple-400/50 text-purple-300/90 hover:border-purple-400 hover:bg-purple-500/10"}`}
             aria-label="打开菜单"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <span className="hidden sm:inline">简历 · 面试</span>
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
             </svg>
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-full mt-1 py-1 min-w-[140px] rounded-lg bg-gray-900/95 border border-gray-700 shadow-xl z-50">
+            <div className="absolute right-0 top-full mt-2 py-1.5 min-w-[160px] rounded-xl bg-black/95 border-2 border-purple-400/50 shadow-xl shadow-purple-500/20 z-50">
               <a
                 href="/"
-                className="block px-4 py-2.5 text-sm text-purple-400 font-medium bg-purple-500/10 transition"
+                className="block px-4 py-3 text-sm font-medium text-purple-400 bg-purple-500/15 hover:bg-purple-500/25 transition rounded-t-xl"
                 onClick={() => setMenuOpen(false)}
               >
                 简历优化
               </a>
               <a
                 href="/mock-interview"
-                className="block px-4 py-2.5 text-sm text-gray-200 hover:bg-white/5 hover:text-purple-400 transition"
+                className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
                 onClick={() => setMenuOpen(false)}
               >
                 模拟面试
@@ -201,13 +225,70 @@ export default function Home() {
       </h2>
 
       {/* 副标题 */}
-      <p className="text-center text-white text-lg mb-8">
+      <p className="text-center text-white text-lg mb-6">
         3分钟 快速评估：多久能收到面试邀约
       </p>
-      <div className="h-60" /> {/* spacer: 底部与版权之间 40px */}
 
+      {/* Tab：顶部标签栏，与「简历·面试」风格一致 */}
+      <div className="flex items-center gap-1 mb-6 z-10 border-b border-purple-500/20">
+        <button
+          type="button"
+          onClick={() => setMainTab("analyze")}
+          className={`px-3 py-2.5 text-sm font-medium transition border-b-2 -mb-px ${mainTab === "analyze" ? "border-purple-400 text-purple-300" : "border-transparent text-slate-400 hover:text-slate-200"}`}
+        >
+          简历分析
+        </button>
+        <button
+          type="button"
+          onClick={() => setMainTab("history")}
+          className={`px-3 py-2.5 text-sm font-medium transition border-b-2 -mb-px ${mainTab === "history" ? "border-purple-400 text-purple-300" : "border-transparent text-slate-400 hover:text-slate-200"}`}
+        >
+          历史记录与排名
+        </button>
+      </div>
 
-
+      {/* Tab 内容 */}
+      {mainTab === "history" ? (
+        <div className="w-full px-4 z-10 max-w-lg mx-auto space-y-8">
+          {historyRecords.length > 0 ? (
+            <>
+              {/* 我的排行榜：按分数取前 5，岗位名称脱敏 */}
+              <div className="bg-black/50 border border-gray-700 rounded-xl p-4">
+                <h3 className="text-lg font-semibold text-purple-300 mb-3 flex items-center gap-2">
+                  🏆 我的排行榜 · 前 5 岗位
+                </h3>
+                <ul className="space-y-2">
+                  {[...historyRecords]
+                    .sort((a, b) => b.score - a.score)
+                    .slice(0, 5)
+                    .map((r, i) => (
+                      <li
+                        key={`${r.date}-${i}`}
+                        className="flex items-center justify-between py-2 px-3 rounded-lg bg-black/40 border border-gray-700/80"
+                      >
+                        <span className="text-slate-400 font-mono w-6">#{i + 1}</span>
+                        <span className="text-gray-200 flex-1 truncate mx-2" title={r.role}>
+                          {maskRoleName(r.role)}
+                        </span>
+                        <span className="text-cyan-400 font-medium tabular-nums">{r.score.toFixed(1)} 分</span>
+                        {r.rankPercent != null && (
+                          <span className="text-slate-500 text-sm ml-2">超{r.rankPercent.toFixed(0)}%</span>
+                        )}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+              <HistoryChart records={historyRecords} />
+            </>
+          ) : (
+            <div className="text-center py-12 text-slate-500 bg-black/40 border border-gray-700 rounded-xl">
+              <p className="mb-2">暂无历史记录</p>
+              <p className="text-sm">在「简历分析」中完成一次分析后，这里会显示打分与排名的折线图。</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
       {/* 文件上传 */}
       <div className="relative w-full max-w-md mx-auto mb-6 z-10">
         <input
@@ -273,6 +354,8 @@ export default function Home() {
         <AnalysisPanel data={JSON.parse(result)} />
       )}
       <div className="h-60" /> {/* spacer: 底部与版权之间 40px */}
+        </>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-purple-500/20 mt-20 py-10 bg-black/50 text-gray-400 text-sm">

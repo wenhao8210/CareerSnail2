@@ -31,3 +31,20 @@ export const QUESTION_BANK: QuestionItem[] = [
   { id: 19, category: "商业思维", question: "AI漫剧工具的商业模式除了项目交付，还有哪些可能性？", answer: "1. SaaS订阅：开放工具给C端创作者，按生成时长收费。\n2. 模型资产交易：出售训练好的风格Lora或分镜模板。\n3. IP衍生：孵化自有AI漫剧IP，进行流量变现。" },
   { id: 20, category: "数据思维", question: "如何通过数据埋点来优化视频生成的策略？", answer: "关注'重新生成率'和'Prompt修改率'。\n如果用户在某个分镜反复修改Prompt，说明该场景模型理解困难。我们需要收集这些Badcase，优化该类场景的Prompt模板或引入负向词库。" },
 ];
+
+/** AI 产品经理面试核心题库 - 通用题库，作为默认题库 */
+export const AI_PM_QUESTION_BANK: QuestionItem[] = [
+  { id: 101, category: "产品流程", question: "AI产品的标准化诞生流程是什么？", answer: "需求分析 → 竞品调研 → 模型选型与测评 → 产品方案产出 → **模型微调（SFT/Prompt）**与产品优化 → 上线复盘。" },
+  { id: 102, category: "产品定位", question: "如何进行清晰的产品定位？", answer: "对内明确目标用户与核心价值（解决什么问题）；对外识别竞争格局与差异化优势。定位决定产品的迭代优先级与技术走向。" },
+  { id: 103, category: "需求分析", question: "如何深入做需求分析？", answer: "透过表面诉求挖掘情感动机与潜在需求；按功能、社交、效率等维度归类；运用 5W1H框架 拆解场景；最终进行需求去伪存真与优先级排序。" },
+  { id: 104, category: "需求分析", question: "需求优先级排序的准则是什么？", answer: "核心指标是 ROI（投入产出比）。综合衡量模型开发成本、算力成本与业务价值（短期爆发力+长期护城河）。" },
+  { id: 105, category: "竞品分析", question: "竞品分析的目的是什么？", answer: "向外洞察市场潜力与对手边界，寻找切入机会；向内对标自身优劣，辅助定位决策，通过差异化避免同质化竞争。" },
+  { id: 106, category: "竞品分析", question: "竞品分析的执行维度有哪些？", answer: "确定直接/间接竞品；从**功能体验、模型效果（核心）、用户画像、运营数据（DAU/留存/付费）**等维度对比，利用 SWOT 模型输出结论。" },
+  { id: 107, category: "模型选型", question: "模型选型时需考虑哪些关键点？", answer: "模态匹配（文/图/视）、数据量级、推理效果、性能表现（延迟/吞吐）以及最重要的算力成本。" },
+  { id: 108, category: "Prompt工程", question: "Prompt 工程的 CO-STAR 框架指什么？", answer: "Context（背景）、Objective（目标）、Style（风格）、Tone（语气）、Audience（受众）、Response（输出格式）。" },
+  { id: 109, category: "Prompt工程", question: "常用的 Prompt 优化策略有哪些？", answer: "Few-shot（给示例）、任务拆解（由复杂转简单链条）、CoT（思维链，引导模型输出思考过程）。" },
+  { id: 110, category: "技术选型", question: "什么场景下会选择使用 RAG（检索增强生成）？", answer: "需要引入私有/专业知识库、追求高事实准确率、需要降低幻觉及提升长文本召回效果时。" },
+  { id: 111, category: "模型微调", question: "什么是 SFT？Lora 的作用是什么？", answer: "SFT 是针对特定任务的有监督微调。Lora 是一种高效微调技术，通过低秩自适应在保证模型一致性的同时，大幅降低微调的算力门槛。" },
+  { id: 112, category: "模型测评", question: "如何构建科学的模型测评体系？", answer: "1. 构建多维测评集（标准/边界/用户Query）；2. 定义量化指标；3. 执行测评；4. 归因分析并反馈至模型侧。" },
+  { id: 113, category: "模型测评", question: "AI产品常见的测评类型有哪些？", answer: "基线测评（基准对比）、A/B Test、GSB（好/平/差对照）、压力测试、盲测（图灵测试/双盲评议）及线上业务指标监控。" },
+];
