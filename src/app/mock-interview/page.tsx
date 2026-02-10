@@ -517,7 +517,7 @@ export default function MockInterviewPage() {
               className={`flex items-center gap-2 px-3 py-2 rounded-full border font-medium text-sm transition ${menuOpen ? "border-purple-400 bg-purple-500/20 text-purple-300" : "border-purple-400/50 text-purple-300/90 hover:border-purple-400 hover:bg-purple-500/10"}`}
               aria-label="打开菜单"
             >
-              <span className="hidden sm:inline">简历 · 面试</span>
+              <span className="hidden sm:inline">模拟面试</span>
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
               </svg>
@@ -533,10 +533,17 @@ export default function MockInterviewPage() {
                 </a>
                 <a
                   href="/mock-interview"
-                  className="block px-4 py-3 text-sm font-medium text-purple-400 bg-purple-500/15 hover:bg-purple-500/25 transition rounded-b-xl"
+                  className="block px-4 py-3 text-sm font-medium text-purple-400 bg-purple-500/15 hover:bg-purple-500/25 transition"
                   onClick={() => setMenuOpen(false)}
                 >
                   模拟面试
+                </a>
+                <a
+                  href="/agenda"
+                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  议事日程
                 </a>
               </div>
             )}
@@ -587,27 +594,8 @@ export default function MockInterviewPage() {
         </div>
       )}
 
-      <div ref={tutorialProjectRowRef} className="relative z-10 px-4 py-2 border-b border-purple-500/20 bg-black/30 flex items-center gap-2 pt-40">
-        <select
-          value={currentProjectId || ""}
-          onChange={(e) => setCurrentProjectId(e.target.value)}
-          className="flex-1 bg-black/60 text-gray-100 px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50 text-sm"
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-          <button
-            onClick={() => currentProjectId && handleDeleteProject(currentProjectId)}
-            className="p-1.5 text-gray-400 hover:text-rose-500 transition"
-            title="删除当前项目"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-      </div>
-
-      {/* View stack：刷题卡片 | 创建题库 | 错题本 | 生成新题 */}
-      <div className="relative z-10 px-4 py-2 border-b border-purple-500/20 bg-black/30 flex items-center gap-2 flex-wrap">
+      {/* View stack：刷题卡片 | 创建题库 | 错题本 | 生成新题（放在题库选择上方） */}
+      <div className="relative z-10 px-4 py-2 border-b border-purple-500/20 bg-black/30 flex items-center gap-2 flex-wrap pt-40">
         <button
           onClick={() => setView("card")}
           className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${view === "card" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
@@ -635,6 +623,25 @@ export default function MockInterviewPage() {
         >
           {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
           生成新题
+        </button>
+      </div>
+
+      <div ref={tutorialProjectRowRef} className="relative z-10 px-4 py-2 border-b border-purple-500/20 bg-black/30 flex items-center gap-2">
+        <select
+          value={currentProjectId || ""}
+          onChange={(e) => setCurrentProjectId(e.target.value)}
+          className="flex-1 bg-black/60 text-gray-100 px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-purple-400/50 text-sm"
+        >
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => currentProjectId && handleDeleteProject(currentProjectId)}
+          className="p-1.5 text-gray-400 hover:text-rose-500 transition"
+          title="删除当前项目"
+        >
+          <Trash2 className="w-4 h-4" />
         </button>
       </div>
 

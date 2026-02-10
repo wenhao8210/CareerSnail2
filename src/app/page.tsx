@@ -187,7 +187,7 @@ export default function Home() {
             className={`flex items-center gap-2 px-3 py-2 rounded-full border font-medium text-sm transition ${menuOpen ? "border-purple-400 bg-purple-500/20 text-purple-300" : "border-purple-400/50 text-purple-300/90 hover:border-purple-400 hover:bg-purple-500/10"}`}
             aria-label="打开菜单"
           >
-            <span className="hidden sm:inline">简历 · 面试</span>
+            <span className="hidden sm:inline">简历优化</span>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
             </svg>
@@ -203,10 +203,17 @@ export default function Home() {
               </a>
               <a
                 href="/mock-interview"
-                className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
+                className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition"
                 onClick={() => setMenuOpen(false)}
               >
                 模拟面试
+              </a>
+              <a
+                href="/agenda"
+                className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
+                onClick={() => setMenuOpen(false)}
+              >
+                议事日程
               </a>
             </div>
           )}
@@ -219,8 +226,26 @@ export default function Home() {
       {/* ⚡️前景内容包裹层 */}
       <div className="relative z-10 flex flex-col items-center pt-40"></div>
 
+      {/* Sub tab：从左边放，与议事日程/模拟面试一致 */}
+      <div className="w-full flex items-center justify-start gap-2 mb-4 z-10 px-4 sm:px-6">
+        <button
+          type="button"
+          onClick={() => setMainTab("analyze")}
+          className={`px-4 py-2 rounded-full text-sm font-medium transition ${mainTab === "analyze" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+        >
+          简历分析
+        </button>
+        <button
+          type="button"
+          onClick={() => setMainTab("history")}
+          className={`px-4 py-2 rounded-full text-sm font-medium transition ${mainTab === "history" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+        >
+          历史记录与排名
+        </button>
+      </div>
+
       {/* 主标题（页面中部，下移避免被顶栏毛玻璃遮挡） */}
-      <h2 className="text-3xl font-bold mt-8 mb-4 text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 text-center">
+      <h2 className="text-3xl font-bold mt-2 mb-4 text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 text-center">
         🐌 SNAIL CAREER｜蜗牛简历，一毫米也算前进
       </h2>
 
@@ -228,24 +253,6 @@ export default function Home() {
       <p className="text-center text-white text-lg mb-6">
         3分钟 快速评估：多久能收到面试邀约
       </p>
-
-      {/* Tab：顶部标签栏，与「简历·面试」风格一致 */}
-      <div className="flex items-center gap-1 mb-6 z-10 border-b border-purple-500/20">
-        <button
-          type="button"
-          onClick={() => setMainTab("analyze")}
-          className={`px-3 py-2.5 text-sm font-medium transition border-b-2 -mb-px ${mainTab === "analyze" ? "border-purple-400 text-purple-300" : "border-transparent text-slate-400 hover:text-slate-200"}`}
-        >
-          简历分析
-        </button>
-        <button
-          type="button"
-          onClick={() => setMainTab("history")}
-          className={`px-3 py-2.5 text-sm font-medium transition border-b-2 -mb-px ${mainTab === "history" ? "border-purple-400 text-purple-300" : "border-transparent text-slate-400 hover:text-slate-200"}`}
-        >
-          历史记录与排名
-        </button>
-      </div>
 
       {/* Tab 内容 */}
       {mainTab === "history" ? (
