@@ -609,12 +609,17 @@ export default function MockInterviewPage() {
         >
           <Sparkles className="w-4 h-4" /> 创建题库
         </button>
-        <button
-          onClick={() => setView("mistakes")}
-          className={`flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium transition ${view === "mistakes" ? "bg-rose-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
-        >
-          <Book className="w-4 h-4" /> 错题本 ({currentMistakes.length})
-        </button>
+        <div className="relative inline-block">
+          {currentMistakes.length > 0 && view !== "mistakes" && (
+            <span className="absolute -top-1 right-1 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-black/40" aria-label="有错题" />
+          )}
+          <button
+            onClick={() => setView("mistakes")}
+            className={`flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium transition ${view === "mistakes" ? "bg-rose-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+          >
+            <Book className="w-4 h-4" /> 错题本 ({currentMistakes.length})
+          </button>
+        </div>
         <button
           onClick={() => setView("generate")}
           disabled={isGenerating}

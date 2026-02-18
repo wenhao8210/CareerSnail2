@@ -88,6 +88,9 @@ const TASK_LIME = "#2D8A3E";     // 深绿（白字可读）
 /** 任务卡片可选颜色（与当前整页配色一致：品红 / 黄 / 紫 / 绿，黄绿已调深配白字） */
 const TASK_THEME_COLORS = ["bg-[#C2319A]", "bg-[#B89B2C]", "bg-[#9A53D3]", "bg-[#2D8A3E]"] as const;
 
+/** Break task 使用与模拟面试相同的 AI */
+const BREAK_TASK_AI_MODEL = "deepseek-ai/DeepSeek-V3";
+
 /** 从背景 class 或 hex 得到亮度 (0–1)，亮则用黑字 */
 function getLuminanceFromBg(bg: string): number | null {
   const hexMatch = bg.match(/#([0-9A-Fa-f]{6})/);
@@ -221,9 +224,9 @@ function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export default function AgendaPage() {
+export default function AgendaPage(): React.ReactNode {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [tasksFilter, setTasksFilter] = useState<"active" | "done" | "overview">("active");
+  const [tasksFilter, setTasksFilter] = useState<"active" | "break" | "done" | "overview">("active");
   const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
   const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
   /** 详情弹窗内编辑中的副本，有改动时显示「更新」按钮 */
@@ -234,6 +237,14 @@ export default function AgendaPage() {
   const [swipeState, setSwipeState] = useState<{ id: number; x: number } | null>(null);
   const [dateReminders, setDateReminders] = useState<Record<string, "magenta" | "green" | null>>({});
   const [dateMenu, setDateMenu] = useState<{ x: number; y: number; dateKey: string } | null>(null);
+  /** Break task：deadline、span、备注；Break 后得到的子任务预览 */
+  const [breakTaskDeadline, setBreakTaskDeadline] = useState("");
+  const [breakTaskSpan, setBreakTaskSpan] = useState("");
+  const [breakTaskRemarks, setBreakTaskRemarks] = useState("");
+  const [breakPreview, setBreakPreview] = useState<(Array<{ text: string; date?: string; time?: string; duration?: string; included?: boolean }> | null)>(null);
+  const [editingBreakIndex, setEditingBreakIndex] = useState<number | null>(null);
+  const [breakBreakLoading, setBreakBreakLoading] = useState(false);
+  const [breakBreakError, setBreakBreakError] = useState<string | null>(null);
   const [dragTaskId, setDragTaskId] = useState<number | null>(null);
   const [dragOverTaskId, setDragOverTaskId] = useState<number | null>(null);
   /** Overview 拖拽到日期列：当前悬停的日期 */
@@ -244,6 +255,7 @@ export default function AgendaPage() {
   const swipeCurrentXRef = useRef<number>(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const overviewScrollRef = useRef<HTMLDivElement>(null);
+  const breakPreviewRef = useRef<HTMLDivElement>(null);
   const hasHydratedFromStorageRef = useRef(false);
 
   const doneCount = tasks.filter((t) => t.completed).length;
@@ -470,6 +482,121 @@ export default function AgendaPage() {
     setDragOverDateKey(null);
   };
 
+  /** Break task：调用 AI（与模拟面试同接口）拆成 2–5 个子任务并分配时间 */
+  const runBreakTask = async () => {
+    const deadlineStr = breakTaskDeadline.trim();
+    if (!deadlineStr) {
+      setBreakPreview(null);
+      setBreakBreakError("请填写 Deadline");
+      return;
+    }
+    const spanRaw = breakTaskSpan.trim() || "1d";
+    const remarks = breakTaskRemarks.trim();
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+    setBreakBreakError(null);
+    setBreakPreview(null);
+    setBreakBreakLoading(true);
+
+    const prompt = `你是一个任务拆解助手。用户有一个任务的 deadline、时间跨度(span) 和备注描述，请将该任务拆成 2～5 个子任务，并为每个子任务分配建议的日期和时间（从今天到 deadline 之间均匀或按难度分布）。
+
+今日日期：${todayStr}
+Deadline：${deadlineStr}
+时间跨度(span)：${spanRaw}（如 3h 表示 3 小时，2d 表示 2 天）
+任务备注/详细描述：
+${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通用步骤）"}
+
+请仅输出一个 JSON 对象，不要其他说明，格式如下：
+- date：yyyy-mm-dd，安排日期
+- time：HH:mm，安排时间（建议 09:00、14:00 等整点）
+- duration：预计耗时，如 "30min"、"1h"、"1.5h"
+{"tasks":[{"text":"子任务标题（简短）","date":"yyyy-mm-dd","time":"HH:mm","duration":"30min"},...]}
+
+要求：tasks 数组长度为 2～5；text 简洁清晰；日期在今日与 deadline 之间；每条必须包含 time 和 duration。`;
+
+    try {
+      const res = await fetch("/api/siliconflow/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: BREAK_TASK_AI_MODEL,
+          messages: [{ role: "user" as const, content: prompt }],
+          temperature: 0.5,
+          max_tokens: 1500,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "请求失败");
+      }
+      let content = (data.choices?.[0]?.message?.content ?? "").trim();
+      const codeBlock = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (codeBlock) content = codeBlock[1].trim();
+      const parsed = JSON.parse(content);
+      const rawTasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+      const preview: Array<{ text: string; date?: string; time?: string; duration?: string; included?: boolean }> = rawTasks
+        .slice(0, 5)
+        .map((t: { text?: string; date?: string; time?: string; duration?: string }) => ({
+          text: String(t?.text ?? "子任务").trim().toUpperCase() || "子任务",
+          date: t?.date ? String(t.date).slice(0, 10) : undefined,
+          time: t?.time ? String(t.time).slice(0, 5) : undefined,
+          duration: t?.duration ? String(t.duration).trim() : undefined,
+          included: true,
+        }));
+      if (preview.length === 0) throw new Error("未返回有效子任务");
+      setBreakPreview(preview);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "生成失败，请重试";
+      setBreakBreakError(msg);
+      setBreakPreview(null);
+    } finally {
+      setBreakBreakLoading(false);
+    }
+  };
+
+  const updateBreakPreviewItem = (index: number, patch: Partial<{ text: string; date: string; time: string; duration: string; included: boolean }>) => {
+    if (!breakPreview) return;
+    setBreakPreview(breakPreview.map((p, i) => (i === index ? { ...p, ...patch } : p)));
+  };
+
+  const removeBreakPreviewItem = (index: number) => {
+    if (!breakPreview) return;
+    const next = breakPreview.filter((_, i) => i !== index);
+    setBreakPreview(next.length > 0 ? next : null);
+    setEditingBreakIndex((prev) => {
+      if (prev === null) return null;
+      if (prev === index) return null;
+      if (prev > index) return prev - 1;
+      return prev;
+    });
+  };
+
+  const applyBreakPreview = () => {
+    if (!breakPreview?.length) return;
+    const toApply = breakPreview.filter((p) => p.included !== false);
+    if (!toApply.length) return;
+    const baseId = Date.now();
+    setTasks((prev) => [
+      ...prev,
+      ...toApply.map((p, i) => ({
+        id: baseId + i,
+        text: p.text,
+        completed: false,
+        color: "bg-[#9A53D3]",
+        ...(p.date && { date: p.date }),
+        ...(p.time && { time: p.time }),
+        ...(p.duration && { remarks: `预计：${p.duration}` }),
+      })),
+    ]);
+    setEditingBreakIndex(null);
+    setBreakPreview(null);
+    setBreakTaskDeadline("");
+    setBreakTaskSpan("");
+    setBreakTaskRemarks("");
+    setTasksFilter("active");
+  };
+
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
@@ -490,6 +617,15 @@ export default function AgendaPage() {
       return () => document.removeEventListener("click", close);
     }
   }, [dateMenu]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (editingBreakIndex === null) return;
+      if (breakPreviewRef.current && !breakPreviewRef.current.contains(e.target as Node)) setEditingBreakIndex(null);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [editingBreakIndex]);
 
   // 仅在与 localStorage 同步后再写入，避免挂载时用初始值覆盖用户数据
   useEffect(() => {
@@ -531,8 +667,10 @@ export default function AgendaPage() {
     return () => clearTimeout(t);
   }, [tasksFilter]);
 
-  return (
-    <div className="agenda-page-selection min-h-screen flex flex-col text-slate-100 relative overflow-hidden" style={{ backgroundColor: BG_DARK }}>
+  const content = (<div
+    className="agenda-page-selection min-h-screen flex flex-col text-slate-100 relative overflow-hidden"
+    style={{ backgroundColor: BG_DARK }}
+  >
       {/* 柔和光晕 + 细网格 */}
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(194,49,154,0.04)_0%,transparent_70%)]" />
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px]" />
@@ -581,6 +719,13 @@ export default function AgendaPage() {
           </button>
           <button
             type="button"
+            onClick={() => setTasksFilter("break")}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition ${tasksFilter === "break" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+          >
+            Break task
+          </button>
+          <button
+            type="button"
             onClick={() => setTasksFilter("done")}
             className={`px-4 py-2 rounded-full text-sm font-medium transition ${tasksFilter === "done" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
           >
@@ -594,7 +739,155 @@ export default function AgendaPage() {
             Overview
           </button>
         </div>
-        {tasksFilter !== "overview" ? (
+        {tasksFilter !== "overview" ? ( tasksFilter === "break" ? (
+          /* Break task：输入 deadline、span、备注，Break 后预览子任务，一键 Apply */
+          <div className="max-w-lg mx-auto w-full px-4 py-4">
+            <div className="p-4 space-y-4 rounded-2xl border border-white/10" style={{ backgroundColor: BG_DARK }}>
+              <h2 className="text-sm font-black text-white/90 uppercase tracking-wider">Break task</h2>
+              <div className="grid gap-2">
+                <label className="text-xs font-medium text-white/70">Deadline</label>
+                <input
+                  type="date"
+                  value={breakTaskDeadline}
+                  onChange={(e) => setBreakTaskDeadline(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 text-sm bg-white/10 border border-white/20 text-white outline-none focus:ring-2 focus:ring-white/30"
+                />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-xs font-medium text-white/70">Span (e.g. 3h or 2d)</label>
+                <input
+                  type="text"
+                  value={breakTaskSpan}
+                  onChange={(e) => setBreakTaskSpan(e.target.value)}
+                  placeholder="3h / 2d"
+                  className="w-full rounded-lg px-3 py-2 text-sm bg-white/10 border border-white/20 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/30"
+                />
+              </div>
+              <div className="grid gap-2">
+                <label className="text-xs font-medium text-white/70">备注（详细内容，用于拆分）</label>
+                <textarea
+                  value={breakTaskRemarks}
+                  onChange={(e) => setBreakTaskRemarks(e.target.value)}
+                  placeholder="描述任务内容，用换行或逗号分隔可拆成多个子任务"
+                  rows={4}
+                  className="w-full rounded-lg px-3 py-2 text-sm bg-white/10 border border-white/20 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/30 resize-y"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => runBreakTask()}
+                disabled={breakBreakLoading}
+                className="w-full py-3 rounded-xl text-sm font-black text-white transition opacity-90 hover:opacity-100 disabled:opacity-60 disabled:cursor-not-allowed"
+                style={{ backgroundColor: ACCENT }}
+              >
+                {breakBreakLoading ? "AI 生成中…" : "Break"}
+              </button>
+              {breakBreakError && (
+                <p className="text-xs text-red-400 mt-1">{breakBreakError}</p>
+              )}
+            </div>
+            {breakPreview && breakPreview.length > 0 && (
+              <div ref={breakPreviewRef} className="mt-4 p-4 rounded-2xl border border-white/10 space-y-3" style={{ backgroundColor: BG_DARK }}>
+                <p className="text-xs font-black text-white/80 uppercase tracking-wider">Preview（{breakPreview.length} tasks）点击任务可编辑</p>
+                <ul className="space-y-2">
+                  {breakPreview.map((p, i) => (
+                    <li key={i} className="rounded-xl border border-white/10 text-sm overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.05)" }}>
+                      {editingBreakIndex === i ? (
+                        <div className="p-3 flex flex-col gap-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <input
+                              type="text"
+                              value={p.text}
+                              onChange={(e) => updateBreakPreviewItem(i, { text: e.target.value })}
+                              className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs font-black bg-white/10 border border-white/20 text-white outline-none focus:ring-1 focus:ring-white/40"
+                              placeholder="子任务标题"
+                            />
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => setEditingBreakIndex(null)}
+                                className="shrink-0 px-2 py-1 rounded text-xs font-medium text-white/80 hover:bg-white/10"
+                              >
+                                完成
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); removeBreakPreviewItem(i); setEditingBreakIndex(null); }}
+                                className="shrink-0 p-1.5 rounded-lg text-white/70 hover:text-red-400 hover:bg-white/10 transition"
+                                aria-label="删除"
+                              >
+                                <Trash2 size={16} strokeWidth={2} />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input
+                              type="date"
+                              value={p.date ?? ""}
+                              onChange={(e) => updateBreakPreviewItem(i, { date: e.target.value || "" })}
+                              className="rounded-lg px-2 py-1 text-xs bg-white/10 border border-white/20 text-white outline-none focus:ring-1 focus:ring-white/40"
+                            />
+                            <input
+                              type="time"
+                              value={p.time ?? ""}
+                              onChange={(e) => updateBreakPreviewItem(i, { time: e.target.value || "" })}
+                              className="rounded-lg px-2 py-1 text-xs bg-white/10 border border-white/20 text-white outline-none focus:ring-1 focus:ring-white/40 w-20"
+                            />
+                            <input
+                              type="text"
+                              value={p.duration ?? ""}
+                              onChange={(e) => updateBreakPreviewItem(i, { duration: e.target.value.trim() || "" })}
+                              className="rounded-lg px-2 py-1 text-xs bg-white/10 border border-white/20 text-white outline-none focus:ring-1 focus:ring-white/40 w-20"
+                              placeholder="预计 30min"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setEditingBreakIndex(i)}
+                          onKeyDown={(e) => e.key === "Enter" && setEditingBreakIndex(i)}
+                          className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5 transition"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={p.included !== false}
+                            onChange={(e) => { e.stopPropagation(); updateBreakPreviewItem(i, { included: e.target.checked }); }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4 rounded border-white/30 bg-white/10 text-purple-500 focus:ring-white/30"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-black text-white truncate">{p.text}</p>
+                            <p className="text-xs text-white/60 mt-0.5">
+                              {p.date ? formatDateDisplay(p.date) : ""} {p.time ? p.time : ""}
+                              {p.duration ? ` · 预计 ${p.duration}` : ""}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); removeBreakPreviewItem(i); }}
+                            className="shrink-0 p-1.5 rounded-lg text-white/50 hover:text-red-400 hover:bg-white/10 transition"
+                            aria-label="删除"
+                          >
+                            <Trash2 size={16} strokeWidth={2} />
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={applyBreakPreview}
+                  className="w-full py-3 rounded-xl text-sm font-black text-white bg-green-600 hover:bg-green-500 transition"
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
           /* 任务列表 + 添加任务：同一滚动流，button 在毛玻璃之下 */
           <div className="max-w-lg mx-auto w-full px-4 py-4">
             <div className="p-4 space-y-3 rounded-b-2xl border border-t-0 border-white/10" style={{ backgroundColor: BG_DARK }}>
@@ -708,7 +1001,7 @@ export default function AgendaPage() {
               </div>
             )}
           </div>
-        ) : (
+        ) ) : (
           /* Overview：横向日期轴（在整页滚动内，给固定最小高度） */
           <div className="min-h-[70vh] flex flex-col overflow-hidden pb-8">
             <div className="flex-1 min-h-[360px] flex flex-col overflow-hidden">
@@ -909,7 +1202,7 @@ export default function AgendaPage() {
                     );
                   })}
                   {getTagsFromNote(detailEdit?.note ?? detailTask.note ?? "")
-                    .filter((tag) => !PRESET_TAGS.includes(tag))
+                    .filter((tag) => !(PRESET_TAGS as readonly string[]).includes(tag))
                     .map((tag) => (
                       <span
                         key={tag}
@@ -1010,4 +1303,5 @@ export default function AgendaPage() {
       `}} />
     </div>
   );
+  return content;
 }
