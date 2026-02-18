@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import AuthHeader from "./components/AuthHeader";
 
 export const metadata: Metadata = {
   title: "CareerCurve",
@@ -13,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh">
-      <body>{children}</body>
+      <body>
+        <AuthHeader />
+        {children}
+      </body>
     </html>
   );
 }

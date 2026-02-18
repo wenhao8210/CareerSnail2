@@ -598,27 +598,27 @@ export default function MockInterviewPage() {
       <div className="relative z-10 px-4 py-2 border-b border-purple-500/20 bg-black/30 flex items-center gap-2 flex-wrap pt-40">
         <button
           onClick={() => setView("card")}
-          className={`px-3 py-1.5 rounded-full text-sm font-medium transition ${view === "card" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+          className={`px-4 py-2 rounded-full text-sm font-medium transition ${view === "card" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
         >
           刷题卡片
         </button>
         <button
           ref={tutorialCreateRef}
           onClick={() => setView("create")}
-          className={`px-3 py-1.5 rounded-full text-sm font-medium flex items-center gap-1 transition ${view === "create" ? "bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+          className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-1 transition ${view === "create" ? "bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
         >
           <Sparkles className="w-4 h-4" /> 创建题库
         </button>
         <button
           onClick={() => setView("mistakes")}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition ${view === "mistakes" ? "bg-rose-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+          className={`flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium transition ${view === "mistakes" ? "bg-rose-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
         >
           <Book className="w-4 h-4" /> 错题本 ({currentMistakes.length})
         </button>
         <button
           onClick={() => setView("generate")}
           disabled={isGenerating}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition disabled:opacity-70 disabled:cursor-not-allowed ${view === "generate" ? "bg-emerald-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+          className={`flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium transition disabled:opacity-70 disabled:cursor-not-allowed ${view === "generate" ? "bg-emerald-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
           title="AI 生成新10道题"
         >
           {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
