@@ -3,8 +3,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Plus, Check, ArrowUpRight, X, Trash2, GripVertical } from "lucide-react";
+import { Plus, Check, ArrowUpRight, X, Trash2, GripVertical, ChevronLeft, ChevronRight } from "lucide-react";
 import ButtonTreasure from "@/app/components/ButtonTreasure";
+import FeedbackDialog from "@/app/components/FeedbackDialog";
 
 const PX_PER_DAY = 100;
 const TASK_BLOCK_HEIGHT = 72;
@@ -224,9 +225,123 @@ function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** Duolingo 风格的完成音效：短促双音上行 */
+function playCompletionSound(): void {
+  if (typeof window === "undefined") return;
+  const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    const ctx = new Ctx();
+    const playTone = (freq: number, startTime: number, duration = 0.12) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0.2, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    };
+    playTone(523.25, 0);    // C5
+    playTone(659.25, 0.08); // E5
+    playTone(783.99, 0.16); // G5
+  } catch {
+    // 忽略静音或权限等错误
+  }
+}
+
+/** 某年某月的日历格（6 行 × 7 列），每格为 { dateKey, day, isCurrentMonth } */
+function getCalendarGrid(year: number, month: number): Array<{ dateKey: string; day: number; isCurrentMonth: boolean }> {
+  const first = new Date(year, month - 1, 1);
+  const last = new Date(year, month, 0);
+  const startDay = first.getDay();
+  const daysInMonth = last.getDate();
+  const grid: Array<{ dateKey: string; day: number; isCurrentMonth: boolean }> = [];
+  const padStart = startDay;
+  for (let i = 0; i < padStart; i++) {
+    const d = new Date(year, month - 1, 1 - (padStart - i));
+    grid.push({
+      dateKey: toDateKey(d),
+      day: d.getDate(),
+      isCurrentMonth: false,
+    });
+  }
+  for (let day = 1; day <= daysInMonth; day++) {
+    grid.push({
+      dateKey: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      day,
+      isCurrentMonth: true,
+    });
+  }
+  const remaining = 42 - grid.length;
+  for (let i = 1; i <= remaining; i++) {
+    const d = new Date(year, month, i);
+    grid.push({
+      dateKey: toDateKey(d),
+      day: d.getDate(),
+      isCurrentMonth: false,
+    });
+  }
+  return grid;
+}
+
+const WEEKDAY_LABELS = ["日", "一", "二", "三", "四", "五", "六"];
+const MONTH_NAMES = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+
+/** 每日任务：手动输入名称，自动表情，按日勾选完成，显示连续点亮次数；打卡时可选心情，点进可看历史日期与当天表情 */
+type EverydayTask = { id: string; name: string; emoji: string; color: string; completedDates: string[]; moods?: Record<string, string> };
+const AGENDA_EVERYDAY_TASKS_KEY = "snail_career_agenda_everyday_tasks";
+const EVERYDAY_TILE_COLORS = ["#C2319A", "#B89B2C", "#9A53D3", "#2D8A3E", "#1E88E5", "#E65100", "#00897B", "#7B1FA2"];
+const EVERYDAY_EMOJIS = ["📌", "✅", "📖", "🏃", "💪", "🎯", "⭐", "🔥", "🌱", "📝", "🧘", "☕", "🎨", "📞", "💡", "🚀"];
+/** 打卡后可选心情表情 */
+const MOOD_EMOJIS = ["😊", "😢", "😐", "😤", "🎉", "💪", "😴", "🔥", "❤️", "👍"];
+function getEmojiForTask(name: string): string {
+  if (!name.trim()) return EVERYDAY_EMOJIS[0];
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h << 5) - h + name.charCodeAt(i) | 0;
+  return EVERYDAY_EMOJIS[Math.abs(h) % EVERYDAY_EMOJIS.length];
+}
+function getStreak(completedDates: string[]): number {
+  const set = new Set(completedDates);
+  const todayKey = toDateKey(new Date());
+  if (!set.has(todayKey)) return 0;
+  let count = 0;
+  const d = new Date();
+  for (;;) {
+    const key = toDateKey(d);
+    if (!set.has(key)) break;
+    count++;
+    d.setDate(d.getDate() - 1);
+  }
+  return count;
+}
+function loadEverydayTasks(): EverydayTask[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(AGENDA_EVERYDAY_TASKS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((t: Record<string, unknown>) => ({
+      id: String(t.id ?? ""),
+      name: String(t.name ?? ""),
+      emoji: String(t.emoji ?? getEmojiForTask(String(t.name ?? ""))),
+      color: String(t.color ?? EVERYDAY_TILE_COLORS[0]),
+      completedDates: Array.isArray(t.completedDates) ? t.completedDates.filter((x): x is string => typeof x === "string") : [],
+      moods: t.moods && typeof t.moods === "object" && !Array.isArray(t.moods)
+        ? (t.moods as Record<string, string>)
+        : {},
+    })).filter((t) => t.id);
+  } catch {
+    return [];
+  }
+}
+
 export default function AgendaPage(): React.ReactNode {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [tasksFilter, setTasksFilter] = useState<"active" | "break" | "done" | "overview">("active");
+  const [tasksFilter, setTasksFilter] = useState<"home" | "active" | "break" | "done" | "overview">("home");
   const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
   const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
   /** 详情弹窗内编辑中的副本，有改动时显示「更新」按钮 */
@@ -237,6 +352,8 @@ export default function AgendaPage(): React.ReactNode {
   const [swipeState, setSwipeState] = useState<{ id: number; x: number } | null>(null);
   const [dateReminders, setDateReminders] = useState<Record<string, "magenta" | "green" | null>>({});
   const [dateMenu, setDateMenu] = useState<{ x: number; y: number; dateKey: string } | null>(null);
+  /** Overview 当日空白处右键菜单：创建/添加任务 */
+  const [overviewDayMenu, setOverviewDayMenu] = useState<{ x: number; y: number; dateKey: string } | null>(null);
   /** Break task：deadline、span、备注；Break 后得到的子任务预览 */
   const [breakTaskDeadline, setBreakTaskDeadline] = useState("");
   const [breakTaskSpan, setBreakTaskSpan] = useState("");
@@ -249,6 +366,17 @@ export default function AgendaPage(): React.ReactNode {
   const [dragOverTaskId, setDragOverTaskId] = useState<number | null>(null);
   /** Overview 拖拽到日期列：当前悬停的日期 */
   const [dragOverDateKey, setDragOverDateKey] = useState<string | null>(null);
+  /** 每日任务（右侧栏）：名称、表情、颜色、完成日期，连续点亮次数 */
+  const [everydayTasks, setEverydayTasks] = useState<EverydayTask[]>([]);
+  const [newEverydayName, setNewEverydayName] = useState("");
+  const [editingEverydayId, setEditingEverydayId] = useState<string | null>(null);
+  /** 刚打卡待选心情的任务 id */
+  const [pendingMoodTaskId, setPendingMoodTaskId] = useState<string | null>(null);
+  /** 点进查看历史的每日任务 id */
+  const [everydayDetailId, setEverydayDetailId] = useState<string | null>(null);
+  /** 历史日历当前显示的月年 */
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth() + 1);
   /** 拖拽结束后抑制一次点击，避免误开详情 */
   const overviewDragJustEndedRef = useRef(false);
   const swipeStartRef = useRef<{ x: number; startX: number } | null>(null);
@@ -257,6 +385,18 @@ export default function AgendaPage(): React.ReactNode {
   const overviewScrollRef = useRef<HTMLDivElement>(null);
   const breakPreviewRef = useRef<HTMLDivElement>(null);
   const hasHydratedFromStorageRef = useRef(false);
+  const everydayHydratedRef = useRef(false);
+  const todayMemoLoadedRef = useRef(false);
+
+  /** Today 页右侧备忘录（激励自己的话），存 localStorage */
+  const [todayMemo, setTodayMemo] = useState("");
+  const AGENDA_TODAY_MEMO = "agenda_today_memo";
+
+  /** 近期即将到来最多保留 3 件，确定后只显示这 3 件，可重置 */
+  const [pinnedUpcomingIds, setPinnedUpcomingIds] = useState<number[]>([]);
+  const AGENDA_PINNED_UPCOMING = "agenda_pinned_upcoming";
+  const PINNED_UPCOMING_MAX = 3;
+  const pinnedUpcomingLoadedRef = useRef(false);
 
   const doneCount = tasks.filter((t) => t.completed).length;
   const { start: rangeStart, end: rangeEnd } = getOverviewDateRange();
@@ -280,12 +420,18 @@ export default function AgendaPage(): React.ReactNode {
   });
 
   const toggleTask = (id: number) => {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
+    setTasks((prev) => {
+      const next = prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t));
+      const task = next.find((t) => t.id === id);
+      if (task?.completed) playCompletionSound();
+      return next;
+    });
   };
 
   const addTask = () => {
     const { event, date, time } = parseNewTaskInput(newTaskText);
     if (!event) return;
+    const todayStr = toDateKey(new Date());
     setTasks((prev) => [
       ...prev,
       {
@@ -293,11 +439,28 @@ export default function AgendaPage(): React.ReactNode {
         text: event.toUpperCase(),
         completed: false,
         color: "bg-[#9A53D3]", // 无 tag 默认紫
-        ...(date && { date }),
+        date: date || todayStr, // Tasks 里新建默认今天
         ...(time && { time }),
       },
     ]);
     setNewTaskText("");
+  };
+
+  /** 在指定日期创建任务（Overview 右键菜单用），返回新任务 id */
+  const addTaskWithDate = (dateKey: string, openDetail: boolean) => {
+    const id = Date.now();
+    setTasks((prev) => [
+      ...prev,
+      {
+        id,
+        text: "新任务",
+        completed: false,
+        color: TASK_THEME_COLORS[prev.length % TASK_THEME_COLORS.length],
+        date: dateKey,
+      },
+    ]);
+    setOverviewDayMenu(null);
+    if (openDetail) setDetailTaskId(id);
   };
 
   const updateTaskDate = (id: number, date: string) => {
@@ -325,7 +488,47 @@ export default function AgendaPage(): React.ReactNode {
   };
   const formatDateDisplay = (dateStr: string) => (dateStr ? dateStr.replace(/-/g, "/") : "");
 
+  const addEverydayTask = (name: string) => {
+    setEverydayTasks((prev) => [
+      ...prev,
+      {
+        id: `everyday-${Date.now()}`,
+        name,
+        emoji: getEmojiForTask(name),
+        color: EVERYDAY_TILE_COLORS[prev.length % EVERYDAY_TILE_COLORS.length],
+        completedDates: [],
+        moods: {},
+      },
+    ]);
+    setNewEverydayName("");
+  };
+
   const filteredTasks = tasksFilter === "active" ? tasks.filter((t) => !t.completed) : tasksFilter === "done" ? tasks.filter((t) => t.completed) : [];
+  const todayKey = toDateKey(new Date());
+  const todayTasks = tasks.filter((t) => !t.completed && t.date === todayKey);
+  const upcomingTasks = (() => {
+    const end = new Date();
+    end.setDate(end.getDate() + 7);
+    const endKey = toDateKey(end);
+    return tasks
+      .filter((t) => !t.completed && t.date && t.date > todayKey && t.date <= endKey)
+      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.time || "").localeCompare(b.time || ""));
+  })();
+
+  /** Focus mode：今天 + 近期 7 天合并为候选池，选出最重要的 3 件 */
+  const focusPoolTasks = [...todayTasks, ...upcomingTasks];
+  const displayedFocusTasks =
+    pinnedUpcomingIds.length >= PINNED_UPCOMING_MAX
+      ? pinnedUpcomingIds
+          .map((id) => tasks.find((t) => t.id === id))
+          .filter((t): t is TaskItem => t != null)
+      : focusPoolTasks;
+  const pinUpcoming = (taskId: number) => {
+    setPinnedUpcomingIds((prev) =>
+      prev.includes(taskId) ? prev : prev.length >= PINNED_UPCOMING_MAX ? prev : [...prev, taskId]
+    );
+  };
+  const resetPinnedUpcoming = () => setPinnedUpcomingIds([]);
 
   /** 从备注里解析 #标签，用于在标签区显示 */
   const getTagsFromNote = (note?: string): string[] => {
@@ -619,6 +822,14 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
   }, [dateMenu]);
 
   useEffect(() => {
+    const close = () => setOverviewDayMenu(null);
+    if (overviewDayMenu) {
+      document.addEventListener("click", close);
+      return () => document.removeEventListener("click", close);
+    }
+  }, [overviewDayMenu]);
+
+  useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (editingBreakIndex === null) return;
       if (breakPreviewRef.current && !breakPreviewRef.current.contains(e.target as Node)) setEditingBreakIndex(null);
@@ -642,12 +853,51 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
     } catch {}
   }, [dateReminders]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !everydayHydratedRef.current) return;
+    try {
+      localStorage.setItem(AGENDA_EVERYDAY_TASKS_KEY, JSON.stringify(everydayTasks));
+    } catch {}
+  }, [everydayTasks]);
+
   // 挂载后从 localStorage 恢复，再允许上面的 effect 写入，这样既有首屏一致又不会覆盖本地数据
   useEffect(() => {
     setTasks(loadStoredTasks());
     setDateReminders(loadStoredDateReminders());
+    setEverydayTasks(loadEverydayTasks());
+    if (typeof window !== "undefined") {
+      try {
+        setTodayMemo(localStorage.getItem(AGENDA_TODAY_MEMO) || "");
+        const raw = localStorage.getItem(AGENDA_PINNED_UPCOMING);
+        if (raw) {
+          try {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr) && arr.length <= PINNED_UPCOMING_MAX && arr.every((x) => typeof x === "number")) {
+              setPinnedUpcomingIds(arr);
+            }
+          } catch {}
+        }
+      } catch {}
+      todayMemoLoadedRef.current = true;
+      pinnedUpcomingLoadedRef.current = true;
+    }
     hasHydratedFromStorageRef.current = true;
+    everydayHydratedRef.current = true;
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !todayMemoLoadedRef.current) return;
+    try {
+      localStorage.setItem(AGENDA_TODAY_MEMO, todayMemo);
+    } catch {}
+  }, [todayMemo]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !pinnedUpcomingLoadedRef.current) return;
+    try {
+      localStorage.setItem(AGENDA_PINNED_UPCOMING, JSON.stringify(pinnedUpcomingIds));
+    } catch {}
+  }, [pinnedUpcomingIds]);
 
   // Overview 下保证当天日期列在横向滚动区域中间
   useEffect(() => {
@@ -679,7 +929,7 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
       <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 sm:px-6 py-4 backdrop-blur-sm border-b border-white/10" style={{ backgroundColor: "rgba(26,26,26,0.85)" }}>
         <div className="flex flex-col gap-2 min-w-0 flex-shrink-0">
           <h1 className="text-lg sm:text-xl font-bold whitespace-nowrap" style={{ color: ACCENT }}>
-            🐌 SNAIL CAREER｜议事日程
+            🐌 SNAIL CAREER｜小蜗日程
           </h1>
           <ButtonTreasure />
         </div>
@@ -691,7 +941,7 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
             aria-label="打开菜单"
             style={{ color: ACCENT }}
           >
-            <span className="hidden sm:inline">议事日程</span>
+            <span className="hidden sm:inline">小蜗日程</span>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
             </svg>
@@ -700,7 +950,7 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
             <div className="absolute right-0 top-full mt-2 py-1.5 min-w-[160px] rounded-xl border border-white/10 shadow-xl z-50" style={{ backgroundColor: "rgba(26,26,26,0.98)" }}>
               <Link href="/" className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 transition rounded-t-xl" onClick={() => setMenuOpen(false)} style={{ color: ACCENT }}>简历优化</Link>
               <Link href="/mock-interview" className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 transition" onClick={() => setMenuOpen(false)} style={{ color: ACCENT }}>模拟面试</Link>
-              <Link href="/agenda" className="block px-4 py-3 text-sm font-medium bg-white/10 transition rounded-b-xl" onClick={() => setMenuOpen(false)} style={{ color: ACCENT }}>议事日程</Link>
+              <Link href="/agenda" className="block px-4 py-3 text-sm font-medium bg-white/10 transition rounded-b-xl" onClick={() => setMenuOpen(false)} style={{ color: ACCENT }}>小蜗日程</Link>
             </div>
           )}
         </div>
@@ -710,6 +960,13 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden relative z-10 pt-40 agenda-body-scroll">
         {/* Sub tab：与简历优化页同一位置、同一样式 */}
         <div className="w-full flex items-center justify-start gap-2 mb-4 z-10 px-4 sm:px-6">
+          <button
+            type="button"
+            onClick={() => setTasksFilter("home")}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition ${tasksFilter === "home" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+          >
+            Focus mode
+          </button>
           <button
             type="button"
             onClick={() => setTasksFilter("active")}
@@ -739,9 +996,79 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
             Overview
           </button>
         </div>
-        {tasksFilter !== "overview" ? ( tasksFilter === "break" ? (
-          /* Break task：输入 deadline、span、备注，Break 后预览子任务，一键 Apply */
-          <div className="max-w-lg mx-auto w-full px-4 py-4">
+        {tasksFilter !== "overview" ? ( tasksFilter === "home" ? (
+          /* Today：Focus mode — 选出最重要的三件事 + 右半栏（备忘录） */
+          <div className="w-full py-4 flex flex-row gap-6 pl-4 pr-4">
+            <div className="w-1/2 min-w-0 flex flex-col">
+              <div className="w-full p-4 space-y-3 rounded-b-2xl border border-t-0 border-white/10" style={{ backgroundColor: BG_DARK }}>
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-base font-black text-white/90 leading-tight tracking-tight">选出最重要的三件事</h2>
+                  {pinnedUpcomingIds.length >= PINNED_UPCOMING_MAX && (
+                    <button
+                      type="button"
+                      onClick={resetPinnedUpcoming}
+                      className="text-xs font-medium text-white/70 hover:text-white border border-white/30 hover:border-white/50 rounded-lg px-2 py-1 transition shrink-0"
+                    >
+                      重置
+                    </button>
+                  )}
+                </div>
+                {displayedFocusTasks.length === 0 ? (
+                  <p className="text-base text-white/50">暂无（今日与近期任务会出现在这里）</p>
+                ) : (
+                  <ul className="space-y-3">
+                    {displayedFocusTasks.map((task) => (
+                      <li key={task.id} className="flex items-stretch gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDetailTaskId(task.id)}
+                          className={`flex-1 min-w-0 text-left rounded-2xl p-4 flex flex-col min-h-[88px] justify-between transition hover:opacity-90 ${task.color} ${getTaskTextClass(task.color)}`}
+                        >
+                          <span className="text-base font-black leading-tight tracking-tight">{task.text}</span>
+                          {(task.date || task.time) && (
+                            <p className="text-xs font-medium opacity-80 mt-1 tabular-nums">
+                              📅 {[task.date ? formatDateDisplay(task.date) : null, task.time].filter(Boolean).join(" ")}
+                            </p>
+                          )}
+                        </button>
+                        {pinnedUpcomingIds.length < PINNED_UPCOMING_MAX && !pinnedUpcomingIds.includes(task.id) && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); pinUpcoming(task.id); }}
+                            className="shrink-0 self-center px-3 py-1.5 rounded-lg text-xs font-black text-white border border-white/30 hover:bg-white/10 transition"
+                          >
+                            确定
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <div className="w-1/2 min-w-0 flex flex-col">
+              <div className="w-full flex-1 min-h-[280px] p-4 rounded-b-2xl border border-t-0 border-white/10 flex flex-col" style={{ backgroundColor: BG_DARK }}>
+                <h2 className="text-base font-black text-white/90 leading-tight tracking-tight mb-3">备忘录</h2>
+                <textarea
+                  value={todayMemo}
+                  onChange={(e) => setTodayMemo(e.target.value)}
+                  placeholder="写一些激励自己的话…"
+                  className="flex-1 min-h-[200px] w-full rounded-xl px-3 py-2 text-sm text-white bg-white/10 border border-white/20 placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/30 resize-none"
+                />
+              </div>
+            </div>
+          </div>
+        ) : tasksFilter === "break" ? (
+          /* Break task：引导 + 输入 deadline、span、备注，Break 后预览子任务，一键 Apply */
+          <div className="max-w-lg mx-auto w-full px-4 py-4 space-y-4">
+            <div className="p-4 rounded-2xl border border-white/10 bg-white/5">
+              <p className="text-sm text-white/90 leading-relaxed">
+                写下一件最近让你最心烦的事情，我们尝试一点一点克服它。
+              </p>
+              <p className="text-sm text-white/80 leading-relaxed mt-2">
+                分析时会考虑一些可能出现的极端情况，提前看到这些，心里会有一个预期，焦虑也会少一些。
+              </p>
+            </div>
             <div className="p-4 space-y-4 rounded-2xl border border-white/10" style={{ backgroundColor: BG_DARK }}>
               <h2 className="text-sm font-black text-white/90 uppercase tracking-wider">Break task</h2>
               <div className="grid gap-2">
@@ -888,9 +1215,11 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
             )}
           </div>
         ) : (
-          /* 任务列表 + 添加任务：同一滚动流，button 在毛玻璃之下 */
-          <div className="max-w-lg mx-auto w-full px-4 py-4">
-            <div className="p-4 space-y-3 rounded-b-2xl border border-t-0 border-white/10" style={{ backgroundColor: BG_DARK }}>
+          /* 任务列表（左）+ 每日任务（右）：左右等分、顶格、中间留空 */
+          <div className={`w-full py-4 flex ${tasksFilter === "active" ? "flex-row gap-8 pl-4 pr-4" : "max-w-lg mx-auto px-4"}`}>
+            {/* 左侧：常规 tasks，顶格靠左 */}
+            <div className={tasksFilter === "active" ? "flex-1 min-w-0 flex flex-col items-stretch w-full" : "w-full"}>
+            <div className="w-full p-4 space-y-3 rounded-b-2xl border border-t-0 border-white/10" style={{ backgroundColor: BG_DARK }}>
               {filteredTasks.map((task) => (
                 <motion.div
                   key={task.id}
@@ -978,8 +1307,8 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
               ))}
             </div>
             {tasksFilter === "active" && (
-              <div className="p-4 border border-t-0 border-white/10 rounded-b-2xl pb-8" style={{ backgroundColor: BG_DARK }}>
-                <div className="rounded-full flex items-center h-12 overflow-hidden border border-white/15" style={{ backgroundColor: "rgba(0,0,0,0.3)" }}>
+              <div className="w-full p-4 border border-t-0 border-white/10 rounded-b-2xl pb-8" style={{ backgroundColor: BG_DARK }}>
+                <div className="w-full rounded-full flex items-center h-12 overflow-hidden border border-white/15" style={{ backgroundColor: "rgba(0,0,0,0.3)" }}>
                   <input
                     type="text"
                     value={newTaskText}
@@ -1000,6 +1329,292 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                 </div>
               </div>
             )}
+            </div>
+
+            {/* 右侧：每日任务 Everyday tasks，与左侧同高、顶格靠右，添加任务在最下面 */}
+            {tasksFilter === "active" && (
+              <div className="flex-1 min-w-0 flex flex-col items-end self-stretch">
+              <div className="w-max max-w-full flex flex-col rounded-2xl border border-white/10 overflow-hidden flex-1 min-h-0" style={{ backgroundColor: BG_DARK }}>
+                <h3 className="text-xs font-black text-white/90 uppercase tracking-wider px-2 py-1.5 border-b border-white/10 shrink-0">
+                  Everyday tasks
+                </h3>
+                <div className="flex-1 overflow-y-auto p-1 min-h-0">
+                  <div className="grid grid-cols-2 gap-1 w-[284px]" style={{ gridTemplateColumns: "140px 140px" }}>
+                    {everydayTasks.map((et) => {
+                      const todayKey = toDateKey(new Date());
+                      const doneToday = et.completedDates.includes(todayKey);
+                      const streak = getStreak(et.completedDates);
+                      const isEditing = editingEverydayId === et.id;
+                      return (
+                        <div
+                          key={et.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            const now = new Date();
+                            setCalendarYear(now.getFullYear());
+                            setCalendarMonth(now.getMonth() + 1);
+                            setEverydayDetailId(et.id);
+                          }}
+                          onKeyDown={(e) => e.key === "Enter" && (() => { const now = new Date(); setCalendarYear(now.getFullYear()); setCalendarMonth(now.getMonth() + 1); setEverydayDetailId(et.id); })()}
+                          className={`w-[140px] h-[140px] shrink-0 rounded-xl flex flex-col p-2 transition-all relative cursor-pointer border ${doneToday ? "ring-2 ring-white/50 ring-offset-0 brightness-110 border-[#DD8C4E]" : "grayscale border-white/10"}`}
+                          style={{ backgroundColor: et.color }}
+                        >
+                          {/* 顶行：左上任务图标，右上连续徽章 */}
+                          <div className="flex justify-between items-start gap-1 shrink-0">
+                            <div className="w-11 h-11 rounded-lg flex items-center justify-center shrink-0 text-3xl leading-none bg-[#F58220] shadow-sm" aria-hidden>
+                              {doneToday && et.moods?.[todayKey] ? et.moods[todayKey] : et.emoji}
+                            </div>
+                            {doneToday && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#F58220]/90 text-white text-sm font-black tabular-nums leading-none shrink-0" title={`连续 ${streak} 天`}>
+                                <span className="leading-none text-base">🔥</span>
+                                <span>{streak}</span>
+                              </span>
+                            )}
+                          </div>
+                          {/* 中间：任务标题，大号加粗居中 */}
+                          <div className="flex-1 flex items-center justify-center min-h-0 py-1">
+                            {isEditing ? (
+                              <input
+                                type="text"
+                                value={et.name}
+                                onChange={(e) =>
+                                  setEverydayTasks((prev) =>
+                                    prev.map((t) => (t.id !== et.id ? t : { ...t, name: e.target.value, emoji: getEmojiForTask(e.target.value) }))
+                                  )}
+                                onBlur={() => setEditingEverydayId(null)}
+                                onKeyDown={(e) => e.key === "Enter" && setEditingEverydayId(null)}
+                                className="w-full text-xs font-bold bg-white/20 border border-white/40 rounded px-1 py-0.5 text-white placeholder:text-white/60 outline-none max-w-full text-center"
+                                placeholder="任务名称"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            ) : (
+                              <p
+                                className="text-sm font-bold text-white leading-tight line-clamp-2 break-words w-full text-center cursor-pointer px-0.5"
+                                style={{ textShadow: "0 0 1px rgba(0,0,0,0.5)" }}
+                                onClick={(e) => { e.stopPropagation(); setEditingEverydayId(et.id); }}
+                                title="点击编辑名称"
+                              >
+                                {et.name || "点击编辑"}
+                              </p>
+                            )}
+                          </div>
+                          {/* 底行：左下勾选/心情 */}
+                          <div className="flex justify-between items-end gap-1 shrink-0">
+                            <div className="flex flex-col items-start gap-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (doneToday) {
+                                    setEverydayTasks((prev) =>
+                                      prev.map((t) =>
+                                        t.id !== et.id
+                                          ? t
+                                          : {
+                                              ...t,
+                                              completedDates: t.completedDates.filter((d) => d !== todayKey),
+                                              moods: (() => {
+                                                const m = { ...(t.moods || {}) };
+                                                delete m[todayKey];
+                                                return m;
+                                              })(),
+                                            }
+                                      )
+                                    );
+                                    setPendingMoodTaskId((id) => (id === et.id ? null : id));
+                                  } else {
+                                    playCompletionSound();
+                                    setEverydayTasks((prev) =>
+                                      prev.map((t) =>
+                                        t.id !== et.id ? t : { ...t, completedDates: [...t.completedDates, todayKey].sort() }
+                                      )
+                                    );
+                                    setPendingMoodTaskId(et.id);
+                                  }
+                                }}
+                                className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${doneToday ? "bg-white border-[#F58220]" : "border-white/60 bg-transparent"}`}
+                                aria-label={doneToday ? "取消今日完成" : "标记今日完成"}
+                              >
+                                {doneToday && <Check size={12} className="text-[#1A1A1A]" strokeWidth={4} />}
+                              </button>
+                              {pendingMoodTaskId === et.id && (
+                                <div className="flex flex-wrap gap-0.5 max-w-full" onClick={(e) => e.stopPropagation()}>
+                                  {MOOD_EMOJIS.map((m) => (
+                                    <button
+                                      key={m}
+                                      type="button"
+                                      onClick={() => {
+                                        setEverydayTasks((prev) =>
+                                          prev.map((t) =>
+                                            t.id !== et.id
+                                              ? t
+                                              : { ...t, moods: { ...(t.moods || {}), [todayKey]: m } }
+                                          )
+                                        );
+                                        setPendingMoodTaskId(null);
+                                      }}
+                                      className="w-6 h-6 flex items-center justify-center rounded text-base hover:bg-white/20"
+                                    >
+                                      {m}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="shrink-0 p-4 border-t border-white/10 rounded-b-2xl pb-6" style={{ backgroundColor: BG_DARK }}>
+                  <div className="rounded-full flex items-center h-10 overflow-hidden border border-white/15" style={{ backgroundColor: "rgba(0,0,0,0.3)" }}>
+                    <input
+                      type="text"
+                      value={newEverydayName}
+                      onChange={(e) => setNewEverydayName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && (newEverydayName.trim() ? addEverydayTask(newEverydayName.trim()) : null)}
+                      placeholder="输入每日任务名称"
+                      className="flex-1 min-w-0 bg-transparent px-3 text-xs font-medium outline-none placeholder:text-white/50 text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => newEverydayName.trim() && addEverydayTask(newEverydayName.trim())}
+                      className="w-10 h-full text-white flex items-center justify-center hover:opacity-90 transition-opacity shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ backgroundColor: ACCENT }}
+                      disabled={!newEverydayName.trim()}
+                    >
+                      <Plus size={18} strokeWidth={3} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              </div>
+            )}
+
+            {/* 每日任务历史详情：日历视图，日期上显示当天心情 */}
+            {everydayDetailId && (() => {
+              const et = everydayTasks.find((t) => t.id === everydayDetailId);
+              if (!et) return null;
+              const completedSet = new Set(et.completedDates || []);
+              const todayKey = toDateKey(new Date());
+              const grid = getCalendarGrid(calendarYear, calendarMonth);
+              const goPrevMonth = () => {
+                if (calendarMonth === 1) {
+                  setCalendarMonth(12);
+                  setCalendarYear((y) => y - 1);
+                } else setCalendarMonth((m) => m - 1);
+              };
+              const goNextMonth = () => {
+                if (calendarMonth === 12) {
+                  setCalendarMonth(1);
+                  setCalendarYear((y) => y + 1);
+                } else setCalendarMonth((m) => m + 1);
+              };
+              const goToday = () => {
+                const now = new Date();
+                setCalendarYear(now.getFullYear());
+                setCalendarMonth(now.getMonth() + 1);
+              };
+              return (
+                <div
+                  className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+                  onClick={() => setEverydayDetailId(null)}
+                >
+                  <div
+                    className="w-full max-w-sm rounded-2xl border border-white/10 overflow-hidden shadow-xl"
+                    style={{ backgroundColor: BG_DARK }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="p-3 border-b border-white/10 flex items-center justify-between" style={{ backgroundColor: et.color }}>
+                      <span className="text-base font-bold text-white truncate">{et.name || "未命名"}</span>
+                      <button
+                        type="button"
+                        onClick={() => setEverydayDetailId(null)}
+                        className="p-1.5 rounded-full hover:bg-white/20 text-white"
+                        aria-label="关闭"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-bold text-white">
+                          {calendarYear}年 {MONTH_NAMES[calendarMonth - 1]}
+                        </span>
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={goPrevMonth}
+                            className="p-1.5 rounded hover:bg-white/10 text-white"
+                            aria-label="上一月"
+                          >
+                            <ChevronLeft size={18} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={goNextMonth}
+                            className="p-1.5 rounded hover:bg-white/10 text-white"
+                            aria-label="下一月"
+                          >
+                            <ChevronRight size={18} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-7 gap-0.5 mb-2">
+                        {WEEKDAY_LABELS.map((w) => (
+                          <div key={w} className="text-center text-[10px] font-medium text-white/60 py-0.5">
+                            {w}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-0.5">
+                        {grid.map((cell) => {
+                          const isToday = cell.dateKey === todayKey;
+                          const hasMood = completedSet.has(cell.dateKey);
+                          const mood = et.moods?.[cell.dateKey];
+                          return (
+                            <div
+                              key={cell.dateKey}
+                              className={`min-h-[36px] flex flex-col items-center justify-center rounded border text-center ${
+                                !cell.isCurrentMonth ? "text-white/40" : "text-white"
+                              } ${hasMood ? "bg-blue-500/20 border-blue-400/50" : isToday ? "border-white/60" : "border-transparent"}`}
+                            >
+                              <span className="text-xs font-medium tabular-nums">{cell.day}</span>
+                              {hasMood && (
+                                <span className="text-sm leading-tight mt-0.5" title={mood || "已打卡"}>
+                                  {mood ?? "✓"}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const name = et.name?.trim() || "未命名";
+                            if (!window.confirm(`是否删除：${name}\n\n删除后所有的历史记录将一起被删除。`)) return;
+                            setEverydayTasks((prev) => prev.filter((t) => t.id !== et.id));
+                            setEditingEverydayId((id) => (id === et.id ? null : id));
+                            setEverydayDetailId(null);
+                          }}
+                          className="text-xs text-red-400 hover:text-red-300"
+                        >
+                          删除
+                        </button>
+                        <button type="button" onClick={goToday} className="text-xs text-blue-400 hover:text-blue-300">
+                          今天
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         ) ) : (
           /* Overview：横向日期轴（在整页滚动内，给固定最小高度） */
@@ -1028,26 +1643,34 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                         )}
                       </div>
                       <div
-                        className={`flex-1 flex flex-col px-1 min-h-[280px] pt-[30px] transition-colors ${dragOverDateKey === dateKey ? "bg-white/10 rounded-lg" : ""}`}
+                        className={`flex-1 flex flex-col px-1 min-h-[280px] pt-[30px] transition-colors cursor-context-menu ${dragOverDateKey === dateKey ? "bg-white/10 rounded-lg" : ""}`}
                         onDragOver={(e) => handleOverviewDragOver(e, dateKey)}
                         onDragLeave={handleOverviewDragLeave}
                         onDrop={(e) => handleOverviewDrop(e, dateKey)}
+                        onContextMenu={(e) => {
+                          if ((e.target as HTMLElement).closest("[data-overview-task]")) return;
+                          e.preventDefault();
+                          setOverviewDayMenu({ x: e.clientX, y: e.clientY, dateKey });
+                        }}
                       >
                         {/* 未完成区：固定高度，底边为固定分隔线，完成区从该线下方「落下」 */}
                         <div className="flex flex-col gap-1 flex-shrink-0 overflow-y-auto pb-2" style={{ height: UNFINISHED_ZONE_HEIGHT, minHeight: UNFINISHED_ZONE_HEIGHT }}>
                           {(tasksByDate[dateKey] || []).filter((t) => !t.completed).map((task) => (
                             <div
                               key={task.id}
+                              data-overview-task
                               role="button"
                               tabIndex={0}
                               draggable
-                              onClick={() => {
+                              onClick={(e) => {
+                                if (e.button !== 0) return; // 仅左键打开详情，右键留给空白处菜单
                                 if (overviewDragJustEndedRef.current) {
                                   overviewDragJustEndedRef.current = false;
                                   return;
                                 }
                                 setDetailTaskId(task.id);
                               }}
+                              onContextMenu={(e) => e.stopPropagation()}
                               onKeyDown={(e) => e.key === "Enter" && setDetailTaskId(task.id)}
                               onDragStart={(e) => handleOverviewDragStart(e, task.id)}
                               onDragEnd={handleOverviewDragEnd}
@@ -1063,16 +1686,19 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                           {(tasksByDate[dateKey] || []).filter((t) => t.completed).map((task) => (
                             <div
                               key={task.id}
+                              data-overview-task
                               role="button"
                               tabIndex={0}
                               draggable
-                              onClick={() => {
+                              onClick={(e) => {
+                                if (e.button !== 0) return;
                                 if (overviewDragJustEndedRef.current) {
                                   overviewDragJustEndedRef.current = false;
                                   return;
                                 }
                                 setDetailTaskId(task.id);
                               }}
+                              onContextMenu={(e) => e.stopPropagation()}
                               onKeyDown={(e) => e.key === "Enter" && setDetailTaskId(task.id)}
                               onDragStart={(e) => handleOverviewDragStart(e, task.id)}
                               onDragEnd={handleOverviewDragEnd}
@@ -1100,6 +1726,13 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                 </button>
                 <button type="button" className="w-full px-3 py-2 text-left text-sm font-medium text-white/70 hover:bg-white/10" onClick={() => setDateReminder(dateMenu.dateKey, null)}>
                   取消提醒
+                </button>
+              </div>
+            )}
+            {overviewDayMenu && (
+              <div className="fixed z-[100] py-1 min-w-[140px] rounded-lg bg-black/95 border border-white/10 shadow-xl" style={{ left: overviewDayMenu.x, top: overviewDayMenu.y }} onClick={(e) => e.stopPropagation()}>
+                <button type="button" className="w-full px-3 py-2 text-left text-sm font-medium text-white hover:bg-white/10" onClick={() => addTaskWithDate(overviewDayMenu.dateKey, true)}>
+                  创建任务
                 </button>
               </div>
             )}
@@ -1291,6 +1924,48 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
           </div>
         )}
       </div>
+
+      {/* Footer：与首页一致 */}
+      <footer className="border-t border-purple-500/20 mt-20 py-10 bg-black/50 text-gray-400 text-sm shrink-0">
+        <div className="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-4 gap-8">
+          <div>
+            <h2 className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 mb-2">
+              🐌 SNAIL CAREER
+            </h2>
+            <p className="text-gray-500 mb-3">蜗牛简历 | 一毫米也算前进。</p>
+            <p className="text-xs text-gray-600">
+              AI 简历分析与岗位匹配工具，帮助你了解求职进度与优化方向。
+            </p>
+          </div>
+          <div>
+            <h3 className="text-gray-300 font-semibold mb-3">Resources</h3>
+            <ul className="space-y-2">
+              <li><a href="https://uiverse.io" className="hover:text-purple-400 transition">UIverse.io</a></li>
+              <li><a href="https://cssbuttons.io" className="hover:text-purple-400 transition">Cssbuttons.io</a></li>
+              <li><a href="https://pixelrepo.com" className="hover:text-purple-400 transition">Pixelrepo.com</a></li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-gray-300 font-semibold mb-3">Information</h3>
+            <ul className="space-y-2">
+              <li><FeedbackDialog /></li>
+              <li><FeedbackDialog kind="cooperation" /></li>
+              <li><a href="https://xhslink.com/m/8bOzZ9dlgop" target="_blank" rel="noopener noreferrer" className="hover:text-purple-400 transition">About me</a></li>
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-gray-300 font-semibold mb-3">Legal</h3>
+            <ul className="space-y-2">
+              <li><a href="#" className="hover:text-purple-400 transition">Terms</a></li>
+              <li><a href="#" className="hover:text-purple-400 transition">Privacy policy</a></li>
+              <li><a href="#" className="hover:text-purple-400 transition">Disclaimer</a></li>
+            </ul>
+          </div>
+        </div>
+        <div className="text-center text-gray-600 text-xs mt-10 border-t border-purple-500/10 pt-4">
+          © 2025 SNAIL CAREER. All rights reserved. | Made with 💜 by Wenhao Wang
+        </div>
+      </footer>
 
       <style dangerouslySetInnerHTML={{ __html: `
         .agenda-body-scroll::-webkit-scrollbar { width: 8px; }

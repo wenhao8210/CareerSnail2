@@ -3,8 +3,100 @@ import { useState, useEffect, useRef } from "react";
 import AnalyzingTips from "./components/AnalyzingTips";
 import AnalysisPanel from "./components/AnalysisPanel";
 import ButtonTreasure from "./components/ButtonTreasure";
+import FeedbackDialog from "./components/FeedbackDialog";
 import HistoryChart from "./components/HistoryChart";
 import { getHistory, appendToHistory, maskRoleName, type AnalysisRecord } from "@/lib/historyStorage";
+
+const CLIPBOARD_STORAGE_KEY = "snail_career_clipboard";
+
+type EducationBlock = { 大学: string; 专业: string; 时间: string };
+type ClipboardData = {
+  姓名: string;
+  身份证: string;
+  手机: string;
+  邮箱: string;
+  教育背景: { 本科: EducationBlock; 研究生: EducationBlock };
+  实习经历: string[];
+  求职意向: string;
+};
+
+const defaultEducationBlock = (): EducationBlock => ({ 大学: "", 专业: "", 时间: "" });
+const defaultClipboardData = (): ClipboardData => ({
+  姓名: "",
+  身份证: "",
+  手机: "",
+  邮箱: "",
+  教育背景: { 本科: defaultEducationBlock(), 研究生: defaultEducationBlock() },
+  实习经历: [""],
+  求职意向: "",
+});
+
+function migrateClipboardData(raw: unknown): ClipboardData {
+  const def = defaultClipboardData();
+  if (!raw || typeof raw !== "object") return def;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.姓名 === "string") def.姓名 = o.姓名;
+  if (typeof o.身份证 === "string") def.身份证 = o.身份证;
+  if (typeof o.手机 === "string") def.手机 = o.手机;
+  if (typeof o.邮箱 === "string") def.邮箱 = o.邮箱;
+  if (typeof o.求职意向 === "string") def.求职意向 = o.求职意向;
+  if (o.教育背景 && typeof o.教育背景 === "object" && !Array.isArray(o.教育背景)) {
+    const edu = o.教育背景 as Record<string, unknown>;
+    ["本科", "研究生"].forEach((key) => {
+      const block = edu[key];
+      if (block && typeof block === "object" && block !== null) {
+        const b = block as Record<string, string>;
+        def.教育背景[key as "本科" | "研究生"] = {
+          大学: typeof b.大学 === "string" ? b.大学 : "",
+          专业: typeof b.专业 === "string" ? b.专业 : "",
+          时间: typeof b.时间 === "string" ? b.时间 : "",
+        };
+      }
+    });
+  } else if (typeof o.教育背景 === "string" && o.教育背景) {
+    def.教育背景.本科.大学 = o.教育背景.slice(0, 200);
+  }
+  if (Array.isArray(o.实习经历)) {
+    def.实习经历 = o.实习经历.filter((x): x is string => typeof x === "string");
+    if (def.实习经历.length === 0) def.实习经历 = [""];
+  } else if (typeof o.实习经历 === "string" && o.实习经历) {
+    def.实习经历 = o.实习经历.split(/\n/).map((s) => s.trim()).filter(Boolean);
+    if (def.实习经历.length === 0) def.实习经历 = [""];
+  }
+  return def;
+}
+
+function parseResumeToClipboard(text: string): Partial<ClipboardData> {
+  const t = text.replace(/\s+/g, " ").trim();
+  const out: Partial<ClipboardData> = {};
+  const idCard = t.match(/\b\d{17}[\dXx]\b/);
+  if (idCard) out.身份证 = idCard[0];
+  const phone = t.match(/\b1[3-9]\d{9}\b/);
+  if (phone) out.手机 = phone[0];
+  const email = t.match(/[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+/);
+  if (email) out.邮箱 = email[0];
+  const nameMatch = t.match(/^(?:姓名|名字)[：:\s]*([^\n]+?)(?=\s*(?:性别|出生|手机|电话|邮箱|教育|\d{4}))/);
+  if (nameMatch) out.姓名 = nameMatch[1].trim();
+  else if (t.length > 0) out.姓名 = t.slice(0, 30).split(/\s/)[0] || "";
+  const eduBlock = t.match(/(?:教育|学历|毕业|学校)[^]*?(?=(?:实习|工作|项目|技能|自我|求职|$))/i);
+  if (eduBlock) {
+    const str = eduBlock[0].replace(/\s+/g, " ").trim();
+    const uni = str.match(/(?:学校|院校|大学|学院)[：:\s]*([^\s]+(?:\s+[^\s]+){0,2})/i);
+    const time = str.match(/(\d{4}[年.\-/]\d{1,2}[月]?[.\-/]\d{1,2}日?|\d{4}[年.\-/]\d{1,2}月?)[^]*?(?:至今|毕业)/) || str.match(/(\d{4}[年.\-/]\d{1,2})/);
+    out.教育背景 = {
+      本科: { 大学: uni ? uni[1].trim().slice(0, 80) : "", 专业: "", 时间: time ? time[1].trim().slice(0, 40) : "" },
+      研究生: defaultEducationBlock(),
+    };
+  }
+  const workBlock = t.match(/(?:实习|工作)经历?[^]*?(?=(?:项目|技能|教育|自我|求职|$))/i);
+  if (workBlock) {
+    const parts = workBlock[0].split(/\d+[.．、]\s*|[-–]\s*/).map((s) => s.trim()).filter((s) => s.length > 10);
+    out.实习经历 = parts.length > 0 ? parts : [workBlock[0].replace(/\s+/g, " ").trim().slice(0, 500)];
+  }
+  const jobMatch = t.match(/(?:求职|意向|岗位)[：:\s]*([^\n]+)/);
+  if (jobMatch) out.求职意向 = jobMatch[1].trim();
+  return out;
+}
 
 
 
@@ -78,8 +170,28 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<"analyze" | "history">("analyze");
+  const [mainTab, setMainTab] = useState<"analyze" | "history" | "clipboard">("analyze");
   const [historyRecords, setHistoryRecords] = useState<AnalysisRecord[]>([]);
+  const [clipboardData, setClipboardData] = useState<ClipboardData>(() => {
+    if (typeof window === "undefined") return defaultClipboardData();
+    try {
+      const raw = localStorage.getItem(CLIPBOARD_STORAGE_KEY);
+      if (raw) return migrateClipboardData(JSON.parse(raw));
+    } catch {}
+    return defaultClipboardData();
+  });
+  const [clipboardPasteText, setClipboardPasteText] = useState("");
+  const [clipboardSaveTip, setClipboardSaveTip] = useState("");
+  const [clipboardCopyTip, setClipboardCopyTip] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const copyClipboardField = (text: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text || "").then(() => {
+        setClipboardCopyTip(true);
+        setTimeout(() => setClipboardCopyTip(false), 1500);
+      }).catch(() => {});
+    }
+  };
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -89,6 +201,12 @@ export default function Home() {
   useEffect(() => {
     if (mainTab === "history") setHistoryRecords(getHistory());
   }, [mainTab]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(clipboardData));
+    } catch {}
+  }, [clipboardData]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -213,7 +331,7 @@ export default function Home() {
                 className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
                 onClick={() => setMenuOpen(false)}
               >
-                议事日程
+                小蜗日程
               </a>
             </div>
           )}
@@ -226,7 +344,7 @@ export default function Home() {
       {/* ⚡️前景内容包裹层 */}
       <div className="relative z-10 flex flex-col items-center pt-40"></div>
 
-      {/* Sub tab：从左边放，与议事日程/模拟面试一致 */}
+      {/* Sub tab：从左边放，与小蜗日程/模拟面试一致 */}
       <div className="w-full flex items-center justify-start gap-2 mb-4 z-10 px-4 sm:px-6">
         <button
           type="button"
@@ -242,17 +360,26 @@ export default function Home() {
         >
           历史记录与排名
         </button>
+        <button
+          type="button"
+          onClick={() => setMainTab("clipboard")}
+          className={`px-4 py-2 rounded-full text-sm font-medium transition ${mainTab === "clipboard" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+        >
+          剪贴板
+        </button>
       </div>
 
-      {/* 主标题（页面中部，下移避免被顶栏毛玻璃遮挡） */}
-      <h2 className="text-3xl font-bold mt-2 mb-4 text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 text-center">
-        🐌 SNAIL CAREER｜蜗牛简历，一毫米也算前进
-      </h2>
-
-      {/* 副标题 */}
-      <p className="text-center text-white text-lg mb-6">
-        3分钟 快速评估：多久能收到面试邀约
-      </p>
+      {/* 主标题、副标题：仅在「简历分析」tab 显示 */}
+      {mainTab === "analyze" && (
+        <>
+          <h2 className="text-3xl font-bold mt-2 mb-4 text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 text-center">
+            🐌 SNAIL CAREER｜蜗牛简历，一毫米也算前进
+          </h2>
+          <p className="text-center text-white text-lg mb-6">
+            3分钟 快速评估：多久能收到面试邀约
+          </p>
+        </>
+      )}
 
       {/* Tab 内容 */}
       {mainTab === "history" ? (
@@ -293,6 +420,209 @@ export default function Home() {
               <p className="text-sm">在「简历分析」中完成一次分析后，这里会显示打分与排名的折线图。</p>
             </div>
           )}
+        </div>
+      ) : mainTab === "clipboard" ? (
+        <div className="w-full px-4 z-10 max-w-lg mx-auto space-y-6">
+          <p className="text-center text-amber-200/90 text-sm bg-amber-500/10 border border-amber-500/30 rounded-lg py-2 px-3">
+            📌 以下内容仅保存在本地，不会上传到云端，请放心使用。
+          </p>
+          <div className="bg-black/50 border border-gray-700 rounded-xl p-4 space-y-3">
+            <label className="block text-sm font-medium text-slate-400">从简历文本解析并填充（可选）</label>
+            <textarea
+              value={clipboardPasteText}
+              onChange={(e) => setClipboardPasteText(e.target.value)}
+              placeholder="粘贴简历原文，点击下方按钮自动抽取姓名、手机、邮箱、教育、实习等填入下方字段"
+              rows={4}
+              className="w-full bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none resize-y"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const parsed = parseResumeToClipboard(clipboardPasteText);
+                setClipboardData((prev) => {
+                  const next = { ...prev };
+                  if (parsed.姓名 != null && parsed.姓名 !== "") next.姓名 = parsed.姓名;
+                  if (parsed.身份证 != null && parsed.身份证 !== "") next.身份证 = parsed.身份证;
+                  if (parsed.手机 != null && parsed.手机 !== "") next.手机 = parsed.手机;
+                  if (parsed.邮箱 != null && parsed.邮箱 !== "") next.邮箱 = parsed.邮箱;
+                  if (parsed.求职意向 != null && parsed.求职意向 !== "") next.求职意向 = parsed.求职意向;
+                  if (parsed.教育背景) {
+                    if (parsed.教育背景.本科?.大学) next.教育背景.本科 = { ...next.教育背景.本科, ...parsed.教育背景.本科 };
+                    if (parsed.教育背景.研究生?.大学) next.教育背景.研究生 = { ...next.教育背景.研究生, ...parsed.教育背景.研究生 };
+                  }
+                  if (parsed.实习经历?.length) next.实习经历 = [...parsed.实习经历];
+                  return next;
+                });
+              }}
+              className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium"
+            >
+              解析并填充
+            </button>
+          </div>
+
+          <div className="bg-black/50 border border-gray-700 rounded-xl p-4 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {(["姓名", "身份证", "手机", "邮箱"] as const).map((key) => (
+                <div key={key}>
+                  <label className="block text-sm text-slate-400 mb-1">{key}</label>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={clipboardData[key]}
+                      onChange={(e) => setClipboardData((prev) => ({ ...prev, [key]: e.target.value }))}
+                      placeholder={`输入${key}`}
+                      className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none"
+                    />
+                    <button type="button" onClick={() => copyClipboardField(clipboardData[key])} className="shrink-0 px-3 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs whitespace-nowrap" title="复制">复制</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-3">教育背景</h4>
+              <div className="space-y-4">
+                <div className="rounded-lg border border-gray-600 p-3 space-y-2">
+                  <span className="text-xs text-purple-400 font-medium">本科</span>
+                  <div className="grid grid-cols-1 gap-2">
+                    <div className="flex gap-2 items-center"><input type="text" placeholder="大学" value={clipboardData.教育背景.本科.大学} onChange={(e) => setClipboardData((prev) => ({ ...prev, 教育背景: { ...prev.教育背景, 本科: { ...prev.教育背景.本科, 大学: e.target.value } } }))} className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none text-sm" /><button type="button" onClick={() => copyClipboardField(clipboardData.教育背景.本科.大学)} className="shrink-0 px-2 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs">复制</button></div>
+                    <div className="flex gap-2 items-center"><input type="text" placeholder="专业" value={clipboardData.教育背景.本科.专业} onChange={(e) => setClipboardData((prev) => ({ ...prev, 教育背景: { ...prev.教育背景, 本科: { ...prev.教育背景.本科, 专业: e.target.value } } }))} className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none text-sm" /><button type="button" onClick={() => copyClipboardField(clipboardData.教育背景.本科.专业)} className="shrink-0 px-2 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs">复制</button></div>
+                    <div className="flex gap-2 items-center"><input type="text" placeholder="时间（如 2018.9-2022.6）" value={clipboardData.教育背景.本科.时间} onChange={(e) => setClipboardData((prev) => ({ ...prev, 教育背景: { ...prev.教育背景, 本科: { ...prev.教育背景.本科, 时间: e.target.value } } }))} className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none text-sm" /><button type="button" onClick={() => copyClipboardField(clipboardData.教育背景.本科.时间)} className="shrink-0 px-2 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs">复制</button></div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-600 p-3 space-y-2">
+                  <span className="text-xs text-purple-400 font-medium">研究生</span>
+                  <div className="grid grid-cols-1 gap-2">
+                    <div className="flex gap-2 items-center"><input type="text" placeholder="大学" value={clipboardData.教育背景.研究生.大学} onChange={(e) => setClipboardData((prev) => ({ ...prev, 教育背景: { ...prev.教育背景, 研究生: { ...prev.教育背景.研究生, 大学: e.target.value } } }))} className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none text-sm" /><button type="button" onClick={() => copyClipboardField(clipboardData.教育背景.研究生.大学)} className="shrink-0 px-2 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs">复制</button></div>
+                    <div className="flex gap-2 items-center"><input type="text" placeholder="专业" value={clipboardData.教育背景.研究生.专业} onChange={(e) => setClipboardData((prev) => ({ ...prev, 教育背景: { ...prev.教育背景, 研究生: { ...prev.教育背景.研究生, 专业: e.target.value } } }))} className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none text-sm" /><button type="button" onClick={() => copyClipboardField(clipboardData.教育背景.研究生.专业)} className="shrink-0 px-2 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs">复制</button></div>
+                    <div className="flex gap-2 items-center"><input type="text" placeholder="时间（如 2022.9-2024.6）" value={clipboardData.教育背景.研究生.时间} onChange={(e) => setClipboardData((prev) => ({ ...prev, 教育背景: { ...prev.教育背景, 研究生: { ...prev.教育背景.研究生, 时间: e.target.value } } }))} className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none text-sm" /><button type="button" onClick={() => copyClipboardField(clipboardData.教育背景.研究生.时间)} className="shrink-0 px-2 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs">复制</button></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-2">实习经历（分条填写，可增删）</h4>
+              <div className="space-y-2">
+                {clipboardData.实习经历.map((item, i) => (
+                  <div key={i} className="flex gap-2 items-start">
+                    <textarea
+                      value={item}
+                      onChange={(e) => setClipboardData((prev) => {
+                        const next = [...prev.实习经历];
+                        next[i] = e.target.value;
+                        return { ...prev, 实习经历: next };
+                      })}
+                      placeholder={`第 ${i + 1} 条实习经历`}
+                      rows={2}
+                      className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none resize-y text-sm min-h-[56px]"
+                    />
+                    <div className="flex flex-col gap-1 shrink-0">
+                      <button type="button" onClick={() => copyClipboardField(item)} className="px-2 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs whitespace-nowrap" title="复制">复制</button>
+                      <button
+                        type="button"
+                        onClick={() => setClipboardData((prev) => {
+                          const next = prev.实习经历.filter((_, j) => j !== i);
+                          return { ...prev, 实习经历: next.length > 0 ? next : [""] };
+                        })}
+                        className="p-2 rounded-lg border border-red-500/50 text-red-400 hover:bg-red-500/20"
+                        title="删除本条"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setClipboardData((prev) => ({ ...prev, 实习经历: [...prev.实习经历, ""] }))}
+                  className="w-full py-2 rounded-lg border border-dashed border-gray-500 text-slate-400 hover:border-purple-400 hover:text-purple-300 text-sm"
+                >
+                  + 添加一条实习经历
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">求职意向</label>
+              <div className="flex gap-2 items-center">
+                <input
+                  type="text"
+                  value={clipboardData.求职意向}
+                  onChange={(e) => setClipboardData((prev) => ({ ...prev, 求职意向: e.target.value }))}
+                  placeholder="输入求职意向"
+                  className="flex-1 min-w-0 bg-black/60 border border-gray-600 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none"
+                />
+                <button type="button" onClick={() => copyClipboardField(clipboardData.求职意向)} className="shrink-0 px-3 py-2 rounded-lg border border-gray-500 text-slate-300 hover:border-purple-400 hover:text-white text-xs whitespace-nowrap" title="复制">复制</button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-700">
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    localStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(clipboardData));
+                    setClipboardSaveTip("已保存到本地");
+                    setTimeout(() => setClipboardSaveTip(""), 2000);
+                  } catch {}
+                }}
+                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium"
+              >
+                保存
+              </button>
+              {clipboardSaveTip && <span className="text-green-400 text-sm py-2">{clipboardSaveTip}</span>}
+              {clipboardCopyTip && <span className="text-green-400 text-sm py-2">已复制</span>}
+              <button
+                type="button"
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(clipboardData, null, 2)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = "snail_career_clipboard.json";
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="px-4 py-2 rounded-lg border border-gray-500 hover:border-purple-400 text-slate-300 hover:text-white text-sm font-medium"
+              >
+                导出 JSON
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    try {
+                      const raw = JSON.parse(reader.result as string);
+                      const next = migrateClipboardData(raw);
+                      setClipboardData(next);
+                      localStorage.setItem(CLIPBOARD_STORAGE_KEY, JSON.stringify(next));
+                      setClipboardSaveTip("已从 JSON 导入并保存");
+                      setTimeout(() => setClipboardSaveTip(""), 2000);
+                    } catch {
+                      setClipboardSaveTip("JSON 格式无效");
+                      setTimeout(() => setClipboardSaveTip(""), 2000);
+                    }
+                    e.target.value = "";
+                  };
+                  reader.readAsText(f);
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => importInputRef.current?.click()}
+                className="px-4 py-2 rounded-lg border border-gray-500 hover:border-purple-400 text-slate-300 hover:text-white text-sm font-medium"
+              >
+                导入 JSON
+              </button>
+            </div>
+          </div>
         </div>
       ) : (
         <>
@@ -393,8 +723,8 @@ export default function Home() {
           <div>
             <h3 className="text-gray-300 font-semibold mb-3">Information</h3>
             <ul className="space-y-2">
-              <li><a href="mailto:walance821@163.com" className="hover:text-purple-400 transition">Give feedback</a></li>
-              <li><a href="mailto:walance821@163.com" className="hover:text-purple-400 transition">Cooperation</a></li>
+              <li><FeedbackDialog /></li>
+              <li><FeedbackDialog kind="cooperation" /></li>
               <li><a href=" https://xhslink.com/m/8bOzZ9dlgop" target="_blank" className="hover:text-purple-400 transition">About me</a></li>
             </ul>
           </div>

@@ -18,6 +18,7 @@ import {
   Maximize2,
 } from "lucide-react";
 import ButtonTreasure from "@/app/components/ButtonTreasure";
+import FeedbackDialog from "@/app/components/FeedbackDialog";
 import { QUESTION_BANK, AI_PM_QUESTION_BANK } from "@/lib/mock-interview/questionBank";
 import { generatePrompt, RESUME_CONTENT } from "@/lib/mock-interview/prompts";
 import "./mock-interview.css";
@@ -25,6 +26,7 @@ import "./mock-interview.css";
 const STORAGE_KEYS = {
   projects: "ai_flashcards_projects",
   customAnswers: "ai_flashcards_custom_answers",
+  questionNotes: "ai_flashcards_question_notes",
   mistakes: "ai_flashcards_mistakes",
   totalLikes: "ai_flashcards_total_likes",
   tutorialDone: "snail_mock_interview_tutorial_done",
@@ -153,11 +155,14 @@ export default function MockInterviewPage() {
   const [mistakes, setMistakes] = useState<Record<string, (QuestionItem & { timestamp?: Date })[]>>({});
   const [view, setView] = useState<"card" | "create" | "mistakes" | "generate">("card");
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
+  const [questionNotes, setQuestionNotes] = useState<Record<string, string>>({});
+  const [noteDraft, setNoteDraft] = useState("");
   const [isEditingCard, setIsEditingCard] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [editingMistakeId, setEditingMistakeId] = useState<string | number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState(false);
+  const [showFinishPopup, setShowFinishPopup] = useState(false);
   const [addQuestionCategory, setAddQuestionCategory] = useState("");
   const [addQuestionQuestion, setAddQuestionQuestion] = useState("");
   const [addQuestionAnswer, setAddQuestionAnswer] = useState("");
@@ -242,6 +247,8 @@ export default function MockInterviewPage() {
     }
     const ca = storage.getItem(STORAGE_KEYS.customAnswers);
     if (ca) try { setCustomAnswers(JSON.parse(ca)); } catch {}
+    const qn = storage.getItem(STORAGE_KEYS.questionNotes);
+    if (qn) try { setQuestionNotes(JSON.parse(qn)); } catch {}
     const sm = storage.getItem(STORAGE_KEYS.mistakes);
     if (sm) try { setMistakes(JSON.parse(sm)); } catch {}
     const tl = storage.getItem(STORAGE_KEYS.totalLikes);
@@ -254,6 +261,15 @@ export default function MockInterviewPage() {
   useEffect(() => {
     storage.setItem(STORAGE_KEYS.customAnswers, JSON.stringify(customAnswers));
   }, [customAnswers]);
+  useEffect(() => {
+    storage.setItem(STORAGE_KEYS.questionNotes, JSON.stringify(questionNotes));
+  }, [questionNotes]);
+
+  const currentQId = currentQuestions[currentIndex]?.id;
+  useEffect(() => {
+    if (currentQId != null) setNoteDraft(questionNotes[String(currentQId)] ?? "");
+  }, [currentQId, questionNotes]);
+
   useEffect(() => {
     storage.setItem(STORAGE_KEYS.mistakes, JSON.stringify(mistakes));
   }, [mistakes]);
@@ -386,7 +402,7 @@ export default function MockInterviewPage() {
     setIsEditingCard(false);
     setTimeout(() => {
       if (currentIndex < currentQuestions.length - 1) setCurrentIndex((i) => i + 1);
-      else alert("🎉 本组题目已完成！可以查看错题本或创建新题库。");
+      else setShowFinishPopup(true);
     }, 200);
   };
 
@@ -543,7 +559,7 @@ export default function MockInterviewPage() {
                   className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
                   onClick={() => setMenuOpen(false)}
                 >
-                  议事日程
+                  小蜗日程
                 </a>
               </div>
             )}
@@ -649,6 +665,21 @@ export default function MockInterviewPage() {
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
+
+      {showFinishPopup && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-black/80 rounded-2xl border border-purple-500/30 shadow-2xl shadow-purple-500/20 w-full max-w-sm p-6 text-center">
+            <p className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 mb-2">🎉 已经刷完</p>
+            <p className="text-sm text-gray-400 mb-6">本组题目已全部完成，可以查看错题本或重新刷题。</p>
+            <button
+              onClick={() => { setShowFinishPopup(false); setCurrentIndex(0); }}
+              className="w-full py-3 rounded-xl text-sm font-medium bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white hover:brightness-110 transition"
+            >
+              回到首页
+            </button>
+          </div>
+        </div>
+      )}
 
       {showAddQuestionModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -778,9 +809,18 @@ export default function MockInterviewPage() {
         {view === "card" ? (
           <>
             <div className="mb-6">
-              <div className="flex justify-between text-xs text-gray-400 mb-1">
+              <div className="flex justify-between items-center text-xs text-gray-400 mb-1">
                 <span>{getCurrentProjectName()}</span>
-                <span>{currentIndex + 1} / {currentQuestions.length}</span>
+                <div className="flex items-center gap-2">
+                  <span className="tabular-nums">{currentIndex + 1} / {currentQuestions.length}</span>
+                  <button
+                    onClick={() => setShowAddQuestionModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-purple-600 hover:bg-purple-500 text-white transition"
+                    title="在题库中手动添加一道题"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> 手动加题
+                  </button>
+                </div>
               </div>
               <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
                 <div className="h-full bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 transition-all duration-300 rounded-full" style={{ width: `${progress}%` }} />
@@ -847,7 +887,7 @@ export default function MockInterviewPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex-1 overflow-y-auto">
+                  <div className="flex-1 min-h-0 overflow-y-auto">
                     {isEditingCard ? (
                       <textarea
                         className="w-full h-full bg-black/50 text-gray-100 p-3 rounded-lg border border-purple-500/40 focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none text-base"
@@ -860,6 +900,29 @@ export default function MockInterviewPage() {
                         {getDisplayAnswer(currentQ.id, currentQ.answer)}
                       </div>
                     )}
+                  </div>
+                  <div className="border-t border-gray-700/80 pt-3 mt-3 flex-shrink-0">
+                    <label className="block text-xs font-bold text-amber-400/90 mb-1.5">我的理解 / 笔记</label>
+                    <textarea
+                      placeholder="记录自己的理解或补充..."
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className="w-full min-h-[72px] bg-black/50 text-gray-200 text-sm p-3 rounded-lg border border-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-400/50 resize-none placeholder:text-gray-500"
+                    />
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setQuestionNotes((prev) => ({ ...prev, [String(currentQ.id)]: noteDraft }));
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600 hover:bg-amber-500 text-white transition"
+                      >
+                        {(questionNotes[String(currentQ.id)] ?? "").trim() ? "更新" : "提交"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -881,15 +944,6 @@ export default function MockInterviewPage() {
                   >
                     <Check className="w-6 h-6 text-emerald-500 mb-1" />
                     <span className="text-sm font-medium text-gray-400 group-hover:text-emerald-400 transition">掌握了</span>
-                  </button>
-                </div>
-                <div className="mt-3 flex justify-center">
-                  <button
-                    onClick={() => setShowAddQuestionModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium bg-amber-600/90 hover:bg-amber-500 text-white transition"
-                    title="在题库中手动添加一道题"
-                  >
-                    <Plus className="w-4 h-4" /> 手动加题
                   </button>
                 </div>
               </>
@@ -959,16 +1013,10 @@ export default function MockInterviewPage() {
           </div>
         ) : (
           <div className="flex flex-col h-full">
-            <div className="flex justify-between items-center mb-4">
+            <div className="mb-4">
               <h2 className="text-xl font-bold flex items-center gap-2 text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400">
                 <Book className="text-rose-500" /> {getCurrentProjectName()} - 需重点复盘 ({currentMistakes.length})
               </h2>
-              <button
-                onClick={() => setView("card")}
-                className="flex items-center gap-2 px-4 py-2 bg-black/60 hover:bg-black/80 text-gray-300 rounded-lg border border-gray-700 hover:border-purple-400/50 transition"
-              >
-                <ArrowLeft className="w-4 h-4" /> 返回
-              </button>
             </div>
             {currentMistakes.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
@@ -988,6 +1036,13 @@ export default function MockInterviewPage() {
                     <h3 className="font-bold text-gray-200 mb-2 pr-12">{m.question}</h3>
                     <div className="h-px bg-purple-500/20 my-3" />
                     <p className="text-sm text-gray-400 leading-relaxed whitespace-pre-line">{getDisplayAnswer(m.id, m.answer)}</p>
+                    {questionNotes[String(m.id)]?.trim() && (
+                      <>
+                        <div className="h-px bg-amber-500/20 my-3" />
+                        <p className="text-xs font-bold text-amber-400/90 mb-1">我的笔记</p>
+                        <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{questionNotes[String(m.id)].trim()}</p>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1020,8 +1075,8 @@ export default function MockInterviewPage() {
           <div>
             <h3 className="text-gray-300 font-semibold mb-3">Information</h3>
             <ul className="space-y-2">
-              <li><a href="mailto:walance821@163.com" className="hover:text-purple-400 transition">Give feedback</a></li>
-              <li><a href="mailto:walance821@163.com" className="hover:text-purple-400 transition">Cooperation</a></li>
+              <li><FeedbackDialog /></li>
+              <li><FeedbackDialog kind="cooperation" /></li>
               <li><a href="https://xhslink.com/m/8bOzZ9dlgop" target="_blank" rel="noopener noreferrer" className="hover:text-purple-400 transition">About me</a></li>
             </ul>
           </div>
