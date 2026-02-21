@@ -556,10 +556,17 @@ export default function MockInterviewPage() {
                 </a>
                 <a
                   href="/agenda"
-                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
+                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition"
                   onClick={() => setMenuOpen(false)}
                 >
                   小蜗日程
+                </a>
+                <a
+                  href="/interview-notes"
+                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  面试复盘
                 </a>
               </div>
             )}
