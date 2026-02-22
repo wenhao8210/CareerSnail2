@@ -6,6 +6,7 @@ import ButtonTreasure from "./components/ButtonTreasure";
 import FeedbackDialog from "./components/FeedbackDialog";
 import HistoryChart from "./components/HistoryChart";
 import { getHistory, appendToHistory, maskRoleName, type AnalysisRecord } from "@/lib/historyStorage";
+import { track } from "@/lib/analytics";
 
 const CLIPBOARD_STORAGE_KEY = "snail_career_clipboard";
 
@@ -280,6 +281,11 @@ export default function Home() {
         total: data.total,
       });
       setHistoryRecords(getHistory());
+      track("resume_analysis_complete", {
+        score,
+        rank_percent: data.rankPercent,
+        total: data.total,
+      });
     } catch (err) {
       console.error("❌ 上传出错:", err);
       alert("上传过程中出现错误，请检查网络或重试。");

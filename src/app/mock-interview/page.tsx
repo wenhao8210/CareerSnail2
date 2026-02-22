@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import ButtonTreasure from "@/app/components/ButtonTreasure";
 import FeedbackDialog from "@/app/components/FeedbackDialog";
+import { track } from "@/lib/analytics";
 import { QUESTION_BANK, AI_PM_QUESTION_BANK } from "@/lib/mock-interview/questionBank";
 import { generatePrompt, RESUME_CONTENT } from "@/lib/mock-interview/prompts";
 import "./mock-interview.css";
@@ -351,6 +352,7 @@ export default function MockInterviewPage() {
       setResumeContent("");
       setGenerationProgress(100);
       setEstimatedTimeRemaining(0);
+      track("mock_interview_deck_created", { question_count: questions.length });
       setTimeout(() => {
         setIsGenerating(false);
         setGenerationProgress(0);
@@ -385,6 +387,13 @@ export default function MockInterviewPage() {
 
   const handleFlip = (e: React.MouseEvent) => {
     if (isEditingCard || (e.target as HTMLElement).closest("button") || (e.target as HTMLElement).closest("textarea")) return;
+    const flippingToAnswer = !isFlipped;
+    if (flippingToAnswer) {
+      track("mock_interview_card_flip", {
+        project_id: currentProjectId ?? "",
+        question_index: currentIndex,
+      });
+    }
     setIsFlipped((f) => !f);
   };
 
