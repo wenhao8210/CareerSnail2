@@ -402,6 +402,13 @@ export default function AgendaPage(): React.ReactNode {
   /** 历史日历当前显示的月年 */
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
   const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth() + 1);
+  /** 每日任务历史里右键「补签」菜单 */
+  const [everydayRetroMenu, setEverydayRetroMenu] = useState<{ x: number; y: number; dateKey: string; taskId: string } | null>(null);
+  /** 补签后待选表情：{ taskId, dateKey } */
+  const [pendingRetroMood, setPendingRetroMood] = useState<{ taskId: string; dateKey: string } | null>(null);
+  /** 补签验证密码弹层：点击补签后弹出输入框 */
+  const [retroPasswordPending, setRetroPasswordPending] = useState<{ taskId: string; dateKey: string } | null>(null);
+  const [retroPasswordInput, setRetroPasswordInput] = useState("");
   /** 日记：按日期记录的评论，发布后可在「查看日记」中查看 */
   const [diaryEntries, setDiaryEntries] = useState<Record<string, string>>({});
   const [diaryViewOpen, setDiaryViewOpen] = useState(false);
@@ -873,6 +880,14 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
       return () => document.removeEventListener("click", close);
     }
   }, [overviewTaskMenu]);
+
+  useEffect(() => {
+    const close = () => setEverydayRetroMenu(null);
+    if (everydayRetroMenu) {
+      document.addEventListener("click", close);
+      return () => document.removeEventListener("click", close);
+    }
+  }, [everydayRetroMenu]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -1624,7 +1639,7 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
               return (
                 <div
                   className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-                  onClick={() => setEverydayDetailId(null)}
+                  onClick={() => { setEverydayDetailId(null); setPendingRetroMood(null); }}
                 >
                   <div
                     className="w-full max-w-sm rounded-2xl border border-white/10 overflow-hidden shadow-xl"
@@ -1635,7 +1650,7 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                       <span className="text-base font-bold text-white truncate">{et.name || "未命名"}</span>
                       <button
                         type="button"
-                        onClick={() => setEverydayDetailId(null)}
+                        onClick={() => { setEverydayDetailId(null); setPendingRetroMood(null); }}
                         className="p-1.5 rounded-full hover:bg-white/20 text-white"
                         aria-label="关闭"
                       >
@@ -1678,10 +1693,16 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                           const isToday = cell.dateKey === todayKey;
                           const hasMood = completedSet.has(cell.dateKey);
                           const mood = et.moods?.[cell.dateKey];
+                          const canRetro = cell.dateKey <= todayKey;
                           return (
                             <div
                               key={cell.dateKey}
-                              className={`min-h-[36px] flex flex-col items-center justify-center rounded border text-center ${
+                              onContextMenu={(e) => {
+                                if (!canRetro) return;
+                                e.preventDefault();
+                                setEverydayRetroMenu({ x: e.clientX, y: e.clientY, dateKey: cell.dateKey, taskId: et.id });
+                              }}
+                              className={`min-h-[36px] flex flex-col items-center justify-center rounded border text-center cursor-context-menu ${
                                 !cell.isCurrentMonth ? "text-white/40" : "text-white"
                               } ${hasMood ? "bg-blue-500/20 border-blue-400/50" : isToday ? "border-white/60" : "border-transparent"}`}
                             >
@@ -1695,6 +1716,32 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                           );
                         })}
                       </div>
+                      {pendingRetroMood && pendingRetroMood.taskId === et.id && (
+                        <div className="mt-3 pt-3 border-t border-white/10">
+                          <p className="text-xs font-bold text-white/80 mb-2">选择补签表情</p>
+                          <div className="flex flex-wrap gap-1">
+                            {MOOD_EMOJIS.map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => {
+                                  const { taskId, dateKey } = pendingRetroMood;
+                                  playCompletionSound();
+                                  setEverydayTasks((prev) =>
+                                    prev.map((t) =>
+                                      t.id !== taskId ? t : { ...t, moods: { ...(t.moods || {}), [dateKey]: m } }
+                                    )
+                                  );
+                                  setPendingRetroMood(null);
+                                }}
+                                className="w-8 h-8 flex items-center justify-center rounded-lg text-lg hover:bg-white/20 border border-white/20"
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10">
                         <button
                           type="button"
@@ -1705,6 +1752,7 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                             setEverydayTasks((prev) => prev.filter((t) => t.id !== et.id));
                             setEditingEverydayId((id) => (id === et.id ? null : id));
                             setEverydayDetailId(null);
+                            setPendingRetroMood(null);
                           }}
                           className="text-xs text-red-400 hover:text-red-300"
                         >
@@ -1719,6 +1767,109 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                 </div>
               );
             })()}
+
+            {/* 每日任务历史：右键补签菜单 */}
+            {everydayRetroMenu && (
+              <div
+                className="fixed z-[100] py-1 min-w-[120px] rounded-lg bg-black/95 border border-white/10 shadow-xl"
+                style={{ left: everydayRetroMenu.x, top: everydayRetroMenu.y }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="w-full px-3 py-2 text-left text-sm font-medium text-white hover:bg-white/10"
+                  onClick={() => {
+                    setRetroPasswordPending({ taskId: everydayRetroMenu.taskId, dateKey: everydayRetroMenu.dateKey });
+                    setRetroPasswordInput("");
+                    setEverydayRetroMenu(null);
+                  }}
+                >
+                  补签
+                </button>
+              </div>
+            )}
+
+            {/* 补签验证密码弹层 */}
+            {retroPasswordPending && (
+              <div
+                className="fixed inset-0 bg-black/60 z-[110] flex items-center justify-center p-4"
+                onClick={() => { setRetroPasswordPending(null); setRetroPasswordInput(""); }}
+              >
+                <div
+                  className="w-full max-w-xs rounded-2xl border border-white/10 p-4 shadow-xl"
+                  style={{ backgroundColor: BG_DARK }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <p className="text-sm font-bold text-white mb-3">请输入验证密码</p>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    autoFocus
+                    value={retroPasswordInput}
+                    onChange={(e) => setRetroPasswordInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (retroPasswordInput !== "8023") {
+                          setRetroPasswordInput("");
+                          return;
+                        }
+                        const { taskId, dateKey } = retroPasswordPending;
+                        setEverydayTasks((prev) =>
+                          prev.map((t) =>
+                            t.id !== taskId
+                              ? t
+                              : { ...t, completedDates: t.completedDates.includes(dateKey) ? t.completedDates : [...t.completedDates, dateKey].sort() }
+                          )
+                        );
+                        setPendingRetroMood({ taskId, dateKey });
+                        setRetroPasswordPending(null);
+                        setRetroPasswordInput("");
+                      }
+                      if (e.key === "Escape") {
+                        setRetroPasswordPending(null);
+                        setRetroPasswordInput("");
+                      }
+                    }}
+                    placeholder="密码"
+                    className="w-full rounded-lg px-3 py-2 text-white bg-white/10 border border-white/20 placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/30 mb-3"
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => { setRetroPasswordPending(null); setRetroPasswordInput(""); }}
+                      className="px-3 py-1.5 rounded-lg text-sm text-white/70 hover:bg-white/10"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (retroPasswordInput !== "8023") {
+                          setRetroPasswordInput("");
+                          return;
+                        }
+                        const { taskId, dateKey } = retroPasswordPending;
+                        setEverydayTasks((prev) =>
+                          prev.map((t) =>
+                            t.id !== taskId
+                              ? t
+                              : { ...t, completedDates: t.completedDates.includes(dateKey) ? t.completedDates : [...t.completedDates, dateKey].sort() }
+                          )
+                        );
+                        setPendingRetroMood({ taskId, dateKey });
+                        setRetroPasswordPending(null);
+                        setRetroPasswordInput("");
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-sm font-bold text-white"
+                      style={{ backgroundColor: ACCENT }}
+                    >
+                      确定
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 查看日记弹层 */}
             {diaryViewOpen && (() => {
