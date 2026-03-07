@@ -114,7 +114,8 @@ export default function InterviewNotesPage() {
               <a href="/" className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-t-xl" onClick={() => setMenuOpen(false)}>简历优化</a>
               <a href="/mock-interview" className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition" onClick={() => setMenuOpen(false)}>模拟面试</a>
               <a href="/agenda" className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition" onClick={() => setMenuOpen(false)}>小蜗日程</a>
-              <a href="/interview-notes" className="block px-4 py-3 text-sm font-medium text-purple-400 bg-purple-500/15 hover:bg-purple-500/25 transition rounded-b-xl" onClick={() => setMenuOpen(false)}>面试复盘</a>
+              <a href="/interview-notes" className="block px-4 py-3 text-sm font-medium text-purple-400 bg-purple-500/15 hover:bg-purple-500/25 transition" onClick={() => setMenuOpen(false)}>面试复盘</a>
+              <a href="/snail-island" className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl" onClick={() => setMenuOpen(false)}>蜗牛岛</a>
             </div>
           )}
         </div>

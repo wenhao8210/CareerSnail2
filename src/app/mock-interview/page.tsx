@@ -16,6 +16,9 @@ import {
   ArrowLeft,
   Minimize2,
   Maximize2,
+  Search,
+  CloudUpload,
+  CloudDownload,
 } from "lucide-react";
 import ButtonTreasure from "@/app/components/ButtonTreasure";
 import FeedbackDialog from "@/app/components/FeedbackDialog";
@@ -53,6 +56,23 @@ const TUTORIAL_STEPS: { title: string; body: string }[] = [
 ];
 
 const MODEL = "deepseek-ai/DeepSeek-V3";
+
+/** 将文本中与 query 匹配的部分用 <mark> 高亮（不区分大小写，保留原文） */
+function highlightMatch(text: string, query: string): React.ReactNode {
+  if (!query.trim() || !text) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <mark key={i} className="bg-amber-500/60 text-amber-100 rounded px-0.5 font-medium">
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+}
 
 function safeLocalStorage() {
   return {
@@ -154,12 +174,15 @@ export default function MockInterviewPage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [mistakes, setMistakes] = useState<Record<string, (QuestionItem & { timestamp?: Date })[]>>({});
-  const [view, setView] = useState<"card" | "create" | "mistakes" | "generate">("card");
+  const [view, setView] = useState<"card" | "create" | "mistakes" | "generate" | "search">("card");
+  const [searchQuery, setSearchQuery] = useState("");
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
   const [questionNotes, setQuestionNotes] = useState<Record<string, string>>({});
   const [noteDraft, setNoteDraft] = useState("");
   const [isEditingCard, setIsEditingCard] = useState(false);
   const [editValue, setEditValue] = useState("");
+  const [isEditingQuestion, setIsEditingQuestion] = useState(false);
+  const [editQuestionValue, setEditQuestionValue] = useState("");
   const [editingMistakeId, setEditingMistakeId] = useState<string | number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState(false);
@@ -177,6 +200,8 @@ export default function MockInterviewPage() {
   const tutorialCreateRef = useRef<HTMLButtonElement>(null);
   const tutorialProjectRowRef = useRef<HTMLDivElement>(null);
   const tutorialTipRef = useRef<HTMLDivElement>(null);
+  const [syncLoading, setSyncLoading] = useState<"up" | "down" | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const storage = safeLocalStorage();
 
   useEffect(() => {
@@ -385,8 +410,75 @@ export default function MockInterviewPage() {
     }
   };
 
+  const getAnonymousId = (): string => {
+    const key = "snail_sync_anonymous_id";
+    try {
+      let id = typeof window !== "undefined" ? window.localStorage.getItem(key) : null;
+      if (!id) {
+        id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `anon_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+        window.localStorage.setItem(key, id);
+      }
+      return id;
+    } catch {
+      return `anon_${Date.now()}`;
+    }
+  };
+
+  const handleSyncToCloud = async () => {
+    setSyncMessage(null);
+    setSyncLoading("up");
+    try {
+      const res = await fetch("/api/mock-interview/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projects, anonymousId: getAnonymousId() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSyncMessage(data?.error ?? "同步失败");
+        return;
+      }
+      setSyncMessage(`已同步 ${data?.count ?? projects.length} 个题库到云端`);
+      setTimeout(() => setSyncMessage(null), 3000);
+    } catch {
+      setSyncMessage("网络错误，请稍后再试");
+    } finally {
+      setSyncLoading(null);
+    }
+  };
+
+  const handleRestoreFromCloud = async () => {
+    setSyncMessage(null);
+    setSyncLoading("down");
+    try {
+      const anonymousId = getAnonymousId();
+      const res = await fetch(`/api/mock-interview/sync?anonymousId=${encodeURIComponent(anonymousId)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setSyncMessage(data?.error ?? "拉取失败");
+        return;
+      }
+      const list = Array.isArray(data?.projects) ? data.projects : [];
+      if (list.length === 0) {
+        setSyncMessage("云端暂无题库");
+        setTimeout(() => setSyncMessage(null), 3000);
+        return;
+      }
+      setProjects(list);
+      if (!currentProjectId || !list.some((p: { id: string }) => p.id === currentProjectId)) {
+        setCurrentProjectId(list[0].id);
+      }
+      setSyncMessage(`已从云端恢复 ${list.length} 个题库`);
+      setTimeout(() => setSyncMessage(null), 3000);
+    } catch {
+      setSyncMessage("网络错误，请稍后再试");
+    } finally {
+      setSyncLoading(null);
+    }
+  };
+
   const handleFlip = (e: React.MouseEvent) => {
-    if (isEditingCard || (e.target as HTMLElement).closest("button") || (e.target as HTMLElement).closest("textarea")) return;
+    if (isEditingCard || isEditingQuestion || (e.target as HTMLElement).closest("button") || (e.target as HTMLElement).closest("textarea")) return;
     const flippingToAnswer = !isFlipped;
     if (flippingToAnswer) {
       track("mock_interview_card_flip", {
@@ -572,10 +664,17 @@ export default function MockInterviewPage() {
                 </a>
                 <a
                   href="/interview-notes"
-                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
+                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition"
                   onClick={() => setMenuOpen(false)}
                 >
                   面试复盘
+                </a>
+                <a
+                  href="/snail-island"
+                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  蜗牛岛
                 </a>
               </div>
             )}
@@ -653,6 +752,12 @@ export default function MockInterviewPage() {
           </button>
         </div>
         <button
+          onClick={() => setView("search")}
+          className={`flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium transition ${view === "search" ? "bg-indigo-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
+        >
+          <Search className="w-4 h-4" /> 搜索
+        </button>
+        <button
           onClick={() => setView("generate")}
           disabled={isGenerating}
           className={`flex items-center gap-1 px-4 py-2 rounded-full text-sm font-medium transition disabled:opacity-70 disabled:cursor-not-allowed ${view === "generate" ? "bg-emerald-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
@@ -680,7 +785,30 @@ export default function MockInterviewPage() {
         >
           <Trash2 className="w-4 h-4" />
         </button>
+        <button
+          type="button"
+          onClick={handleSyncToCloud}
+          disabled={syncLoading !== null}
+          className="p-1.5 text-gray-400 hover:text-emerald-400 transition disabled:opacity-50"
+          title="将当前本地题库同步到云端"
+        >
+          {syncLoading === "up" ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
+        </button>
+        <button
+          type="button"
+          onClick={handleRestoreFromCloud}
+          disabled={syncLoading !== null}
+          className="p-1.5 text-gray-400 hover:text-sky-400 transition disabled:opacity-50"
+          title="从云端恢复题库到本地"
+        >
+          {syncLoading === "down" ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CloudDownload className="w-4 h-4" />}
+        </button>
       </div>
+      {syncMessage && (
+        <p className="text-xs text-center py-1 text-purple-300 px-2">
+          {syncMessage}
+        </p>
+      )}
 
       {showFinishPopup && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -865,7 +993,62 @@ export default function MockInterviewPage() {
                     <span className="inline-block px-3 py-1 bg-purple-500/10 text-purple-300 rounded-full text-xs font-bold mb-4 border border-purple-500/20">
                       {currentQ.category}
                     </span>
-                    <h2 className="text-2xl font-bold leading-relaxed text-gray-100">{currentQ.question}</h2>
+                    <div className="flex items-start justify-between gap-2">
+                      {!isEditingQuestion ? (
+                        <h2 className="text-2xl font-bold leading-relaxed text-gray-100 flex-1 pr-10">{currentQ.question}</h2>
+                      ) : (
+                        <textarea
+                          className="flex-1 w-full min-h-[120px] bg-black/50 text-gray-100 p-3 rounded-lg border border-purple-500/40 focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none text-lg font-bold leading-relaxed"
+                          value={editQuestionValue}
+                          onChange={(e) => setEditQuestionValue(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      )}
+                      {!isEditingQuestion ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditQuestionValue(currentQ.question);
+                            setIsEditingQuestion(true);
+                          }}
+                          className="p-2 hover:bg-white/5 rounded-full text-gray-400 hover:text-purple-400 transition shrink-0"
+                          title="编辑题目"
+                        >
+                          <Edit2 className="w-5 h-5" />
+                        </button>
+                      ) : (
+                        <div className="flex gap-1 shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setIsEditingQuestion(false);
+                            }}
+                            className="p-1.5 text-gray-400 hover:text-rose-400"
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const trimmed = editQuestionValue.trim();
+                              if (trimmed) {
+                                setProjects((prev) =>
+                                  prev.map((p) =>
+                                    p.id !== currentProjectId
+                                      ? p
+                                      : { ...p, questions: p.questions.map((q) => (q.id !== currentQ.id ? q : { ...q, question: trimmed })) }
+                                  )
+                                );
+                              }
+                              setIsEditingQuestion(false);
+                            }}
+                            className="p-1.5 text-emerald-400 hover:text-emerald-300"
+                          >
+                            <Save className="w-5 h-5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <p className="text-center text-gray-500 text-sm">点击翻转查看答案</p>
                 </div>
@@ -944,7 +1127,7 @@ export default function MockInterviewPage() {
               </div>
             </div>
 
-            {!isEditingCard && (
+            {!isEditingCard && !isEditingQuestion && (
               <>
                 <div ref={tutorialActionsRef} className="grid grid-cols-2 gap-4">
                   <button
@@ -1026,6 +1209,73 @@ export default function MockInterviewPage() {
               {isGenerating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
               为当前题库 AI 生成新 10 道题
             </button>
+          </div>
+        ) : view === "search" ? (
+          <div className="w-full max-w-md mx-auto py-6 flex flex-col flex-1 min-h-0">
+            <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 mb-4 flex items-center gap-2">
+              <Search className="w-5 h-5 text-indigo-400" /> 搜索题目
+            </h2>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="按题目、分类或答案搜索..."
+              className="w-full bg-black/60 text-gray-100 px-4 py-3 rounded-xl border border-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400/50 placeholder:text-gray-500 mb-4"
+            />
+            <div className="flex-1 overflow-y-auto space-y-3 pb-20">
+              {(() => {
+                const q = searchQuery.trim().toLowerCase();
+                const list = q
+                  ? currentQuestions.filter(
+                      (item) =>
+                        item.question.toLowerCase().includes(q) ||
+                        (item.category || "").toLowerCase().includes(q) ||
+                        (item.answer || "").toLowerCase().includes(q)
+                    )
+                  : currentQuestions;
+                if (list.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-gray-500">
+                      {searchQuery.trim() ? "没有匹配的题目，试试其他关键词" : "输入关键词搜索当前题库中的题目"}
+                    </div>
+                  );
+                }
+                return list.map((item, idx) => {
+                  const globalIndex = currentQuestions.findIndex((x) => x.id === item.id);
+                  const answerText = getDisplayAnswer(item.id, item.answer);
+                  const matchInAnswer = q && answerText.toLowerCase().includes(q);
+                  const answerSnippet = matchInAnswer && answerText
+                    ? (answerText.length > 120 ? answerText.slice(0, 120).replace(/\s+/g, " ") + "…" : answerText.replace(/\s+/g, " "))
+                    : "";
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setCurrentIndex(globalIndex >= 0 ? globalIndex : 0);
+                        setView("card");
+                        setIsFlipped(false);
+                      }}
+                      className="w-full text-left bg-black/60 hover:bg-black/80 p-4 rounded-xl border border-gray-700 hover:border-indigo-500/50 transition"
+                    >
+                      <span className="inline-block px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-xs font-bold mb-2">
+                        {q && (item.category || "").toLowerCase().includes(q)
+                          ? highlightMatch(item.category || "通用", q)
+                          : (item.category || "通用")}
+                      </span>
+                      <p className="text-gray-200 font-medium line-clamp-2">
+                        {q ? highlightMatch(item.question, q) : item.question}
+                      </p>
+                      {matchInAnswer && answerSnippet && (
+                        <p className="mt-2 text-sm text-gray-400 line-clamp-2">
+                          答案片段：{highlightMatch(answerSnippet, q)}
+                        </p>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
+            </div>
           </div>
         ) : (
           <div className="flex flex-col h-full">
