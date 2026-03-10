@@ -18,6 +18,10 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const supabase = createClient();
+      if (!supabase) {
+        setMessage({ type: "err", text: "登录服务未配置，请在环境中设置 NEXT_PUBLIC_SUPABASE_URL 与 NEXT_PUBLIC_SUPABASE_ANON_KEY" });
+        return;
+      }
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
