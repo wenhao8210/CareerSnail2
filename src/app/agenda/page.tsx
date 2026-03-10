@@ -366,7 +366,7 @@ function loadEverydayTasks(): EverydayTask[] {
 export default function AgendaPage(): React.ReactNode {
   const { user } = useUser();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [tasksFilter, setTasksFilter] = useState<"home" | "active" | "break" | "done" | "overview">("active");
+  const [tasksFilter, setTasksFilter] = useState<"home" | "active" | "done" | "overview">("active");
   const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
   const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
   /** 详情弹窗内编辑中的副本，有改动时显示「更新」按钮 */
@@ -1177,13 +1177,6 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
           </button>
           <button
             type="button"
-            onClick={() => setTasksFilter("break")}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition ${tasksFilter === "break" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
-          >
-            Break task
-          </button>
-          <button
-            type="button"
             onClick={() => setTasksFilter("done")}
             className={`px-4 py-2 rounded-full text-sm font-medium transition ${tasksFilter === "done" ? "bg-purple-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-slate-200"}`}
           >
@@ -1191,228 +1184,11 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
           </button>
         </div>
         {tasksFilter !== "overview" ? ( tasksFilter === "home" ? (
-          /* Today：Focus mode — 选出最重要的三件事 + 右半栏（备忘录） */
-          <div className="w-full py-4 flex flex-row gap-6 pl-4 pr-4">
-            <div className="w-1/2 min-w-0 flex flex-col">
-              <div className="w-full p-4 space-y-3 rounded-b-2xl border border-t-0 border-white/10" style={{ backgroundColor: BG_DARK }}>
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-base font-black text-white/90 leading-tight tracking-tight">选出最重要的三件事</h2>
-                  {pinnedUpcomingIds.length >= PINNED_UPCOMING_MAX && (
-                    <button
-                      type="button"
-                      onClick={resetPinnedUpcoming}
-                      className="text-xs font-medium text-white/70 hover:text-white border border-white/30 hover:border-white/50 rounded-lg px-2 py-1 transition shrink-0"
-                    >
-                      重置
-                    </button>
-                  )}
-                </div>
-                {displayedFocusTasks.length === 0 ? (
-                  <p className="text-base text-white/50">暂无（今日与近期任务会出现在这里）</p>
-                ) : (
-                  <ul className="space-y-3">
-                    {displayedFocusTasks.map((task) => (
-                      <li key={task.id} className="flex items-stretch gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setDetailTaskId(task.id)}
-                          className={`flex-1 min-w-0 text-left rounded-2xl p-4 flex flex-col min-h-[88px] justify-between transition hover:opacity-90 ${task.color} ${getTaskTextClass(task.color)}`}
-                        >
-                          <span className="text-base font-black leading-tight tracking-tight">{task.text}</span>
-                          {(task.date || task.time) && (
-                            <p className="text-xs font-medium opacity-80 mt-1 tabular-nums">
-                              📅 {[task.date ? formatDateDisplay(task.date) : null, task.time].filter(Boolean).join(" ")}
-                            </p>
-                          )}
-                        </button>
-                        {pinnedUpcomingIds.length < PINNED_UPCOMING_MAX && !pinnedUpcomingIds.includes(task.id) && (
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); pinUpcoming(task.id); }}
-                            className="shrink-0 self-center px-3 py-1.5 rounded-lg text-xs font-black text-white border border-white/30 hover:bg-white/10 transition"
-                          >
-                            确定
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setFocusPomodoroTaskId((id) => (id === task.id ? null : task.id));
-                          }}
-                          className={`shrink-0 self-center px-3 py-1.5 rounded-lg text-xs font-black border transition ${
-                            focusPomodoroTaskId === task.id ? "bg-amber-500/90 text-white border-amber-400" : "text-amber-400 border-amber-400/50 hover:bg-amber-500/20"
-                          }`}
-                        >
-                          番茄钟
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+          /* Focus mode：仅番茄钟闹钟，画布宽度约两倍（max-w-md → max-w-4xl） */
+          <div className="w-full py-4 flex flex-col items-center justify-center pl-4 pr-4 min-h-[320px]">
+            <div className="w-full max-w-4xl flex-1 min-h-0 min-w-0 overflow-auto">
+              <PomodoroTomato currentTaskName={undefined} />
             </div>
-            <div className="w-1/2 min-w-0 flex flex-col">
-              <div className="w-full flex-1 min-h-0 min-w-0 overflow-auto">
-                <PomodoroTomato currentTaskName={focusPomodoroTaskId != null ? tasks.find((t) => t.id === focusPomodoroTaskId)?.text : undefined} />
-              </div>
-            </div>
-          </div>
-        ) : tasksFilter === "break" ? (
-          /* Break task：引导 + 输入 deadline、span、备注，Break 后预览子任务，一键 Apply */
-          <div className="max-w-lg mx-auto w-full px-4 py-4 space-y-4">
-            <div className="p-4 rounded-2xl border border-white/10 bg-white/5">
-              <p className="text-sm text-white/90 leading-relaxed">
-                写下一件最近让你最心烦的事情，我们尝试一点一点克服它。
-              </p>
-              <p className="text-sm text-white/80 leading-relaxed mt-2">
-                分析时会考虑一些可能出现的极端情况，提前看到这些，心里会有一个预期，焦虑也会少一些。
-              </p>
-            </div>
-            <div className="p-4 space-y-4 rounded-2xl border border-white/10" style={{ backgroundColor: BG_DARK }}>
-              <h2 className="text-sm font-black text-white/90 uppercase tracking-wider">Break task</h2>
-              <div className="grid gap-2">
-                <label className="text-xs font-medium text-white/70">Deadline</label>
-                <input
-                  type="date"
-                  value={breakTaskDeadline}
-                  onChange={(e) => setBreakTaskDeadline(e.target.value)}
-                  className="w-full rounded-lg px-3 py-2 text-sm bg-white/10 border border-white/20 text-white outline-none focus:ring-2 focus:ring-white/30"
-                />
-              </div>
-              <div className="grid gap-2">
-                <label className="text-xs font-medium text-white/70">Span (e.g. 3h or 2d)</label>
-                <input
-                  type="text"
-                  value={breakTaskSpan}
-                  onChange={(e) => setBreakTaskSpan(e.target.value)}
-                  placeholder="3h / 2d"
-                  className="w-full rounded-lg px-3 py-2 text-sm bg-white/10 border border-white/20 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/30"
-                />
-              </div>
-              <div className="grid gap-2">
-                <label className="text-xs font-medium text-white/70">备注（详细内容，用于拆分）</label>
-                <textarea
-                  value={breakTaskRemarks}
-                  onChange={(e) => setBreakTaskRemarks(e.target.value)}
-                  placeholder="描述任务内容，用换行或逗号分隔可拆成多个子任务"
-                  rows={4}
-                  className="w-full rounded-lg px-3 py-2 text-sm bg-white/10 border border-white/20 text-white placeholder:text-white/40 outline-none focus:ring-2 focus:ring-white/30 resize-y"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => runBreakTask()}
-                disabled={breakBreakLoading}
-                className="w-full py-3 rounded-xl text-sm font-black text-white transition opacity-90 hover:opacity-100 disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{ backgroundColor: ACCENT }}
-              >
-                {breakBreakLoading ? "AI 生成中…" : "Break"}
-              </button>
-              {breakBreakError && (
-                <p className="text-xs text-red-400 mt-1">{breakBreakError}</p>
-              )}
-            </div>
-            {breakPreview && breakPreview.length > 0 && (
-              <div ref={breakPreviewRef} className="mt-4 p-4 rounded-2xl border border-white/10 space-y-3" style={{ backgroundColor: BG_DARK }}>
-                <p className="text-xs font-black text-white/80 uppercase tracking-wider">Preview（{breakPreview.length} tasks）点击任务可编辑</p>
-                <ul className="space-y-2">
-                  {breakPreview.map((p, i) => (
-                    <li key={i} className="rounded-xl border border-white/10 text-sm overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.05)" }}>
-                      {editingBreakIndex === i ? (
-                        <div className="p-3 flex flex-col gap-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <input
-                              type="text"
-                              value={p.text}
-                              onChange={(e) => updateBreakPreviewItem(i, { text: e.target.value })}
-                              className="flex-1 min-w-0 rounded-lg px-2 py-1.5 text-xs font-black bg-white/10 border border-white/20 text-white outline-none focus:ring-1 focus:ring-white/40"
-                              placeholder="子任务标题"
-                            />
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setEditingBreakIndex(null)}
-                                className="shrink-0 px-2 py-1 rounded text-xs font-medium text-white/80 hover:bg-white/10"
-                              >
-                                完成
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); removeBreakPreviewItem(i); setEditingBreakIndex(null); }}
-                                className="shrink-0 p-1.5 rounded-lg text-white/70 hover:text-red-400 hover:bg-white/10 transition"
-                                aria-label="删除"
-                              >
-                                <Trash2 size={16} strokeWidth={2} />
-                              </button>
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <input
-                              type="date"
-                              value={p.date ?? ""}
-                              onChange={(e) => updateBreakPreviewItem(i, { date: e.target.value || "" })}
-                              className="rounded-lg px-2 py-1 text-xs bg-white/10 border border-white/20 text-white outline-none focus:ring-1 focus:ring-white/40"
-                            />
-                            <input
-                              type="time"
-                              value={p.time ?? ""}
-                              onChange={(e) => updateBreakPreviewItem(i, { time: e.target.value || "" })}
-                              className="rounded-lg px-2 py-1 text-xs bg-white/10 border border-white/20 text-white outline-none focus:ring-1 focus:ring-white/40 w-20"
-                            />
-                            <input
-                              type="text"
-                              value={p.duration ?? ""}
-                              onChange={(e) => updateBreakPreviewItem(i, { duration: e.target.value.trim() || "" })}
-                              className="rounded-lg px-2 py-1 text-xs bg-white/10 border border-white/20 text-white outline-none focus:ring-1 focus:ring-white/40 w-20"
-                              placeholder="预计 30min"
-                            />
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setEditingBreakIndex(i)}
-                          onKeyDown={(e) => e.key === "Enter" && setEditingBreakIndex(i)}
-                          className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5 transition"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={p.included !== false}
-                            onChange={(e) => { e.stopPropagation(); updateBreakPreviewItem(i, { included: e.target.checked }); }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-4 h-4 rounded border-white/30 bg-white/10 text-purple-500 focus:ring-white/30"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-black text-white truncate">{p.text}</p>
-                            <p className="text-xs text-white/60 mt-0.5">
-                              {p.date ? formatDateDisplay(p.date) : ""} {p.time ? p.time : ""}
-                              {p.duration ? ` · 预计 ${p.duration}` : ""}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); removeBreakPreviewItem(i); }}
-                            className="shrink-0 p-1.5 rounded-lg text-white/50 hover:text-red-400 hover:bg-white/10 transition"
-                            aria-label="删除"
-                          >
-                            <Trash2 size={16} strokeWidth={2} />
-                          </button>
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  type="button"
-                  onClick={applyBreakPreview}
-                  className="w-full py-3 rounded-xl text-sm font-black text-white bg-green-600 hover:bg-green-500 transition"
-                >
-                  Apply
-                </button>
-              </div>
-            )}
           </div>
         ) : (
           /* 任务列表（左）+ 每日任务（右）：左右等分、顶格、中间留空 */
@@ -2069,11 +1845,13 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                   <div className="inline-flex min-w-full min-h-full py-3 px-6" style={{ minWidth: dateKeys.length * PX_PER_DAY + 48 }}>
                   {dateKeys.map((dateKey) => {
                     const isToday = dateKey === todayKey;
+                    const dayOfWeek = new Date(dateKey + "T12:00:00").getDay();
+                    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
                     const hasInterview = (tasksByDate[dateKey] || []).some((t) => getTagsFromNote(t.note).includes("面试"));
                     return (
                     <div
                       key={dateKey}
-                      className={`shrink-0 flex flex-col border-r last:border-r-0 relative ${isToday ? "border-[#C2319A]/50 bg-[#C2319A]/10 rounded-lg" : "border-white/10"}`}
+                      className={`shrink-0 flex flex-col border-r last:border-r-0 relative ${isToday ? "border-[#C2319A]/50 bg-[#C2319A]/10 rounded-lg" : isWeekend ? "border-white/5" : "border-white/10"}`}
                       style={{ width: PX_PER_DAY }}
                     >
                       <div
@@ -2083,7 +1861,7 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                         {hasInterview && (
                           <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#7BE861] shrink-0" aria-label="当日有面试" />
                         )}
-                        <span className={`text-base font-black tabular-nums text-center w-full tracking-wide ${isToday ? "text-[#C2319A]" : "text-white"}`}>
+                        <span className={`text-base font-black tabular-nums text-center w-full tracking-wide ${isToday ? "text-[#C2319A]" : isWeekend ? "text-white/50" : "text-white"}`}>
                           {dateKey.slice(5).replace("-", "/")}
                         </span>
                         {dateReminders[dateKey] && (

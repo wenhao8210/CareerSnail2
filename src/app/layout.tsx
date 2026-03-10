@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import AuthHeader from "./components/AuthHeader";
+import NewFeaturePopup from "./components/NewFeaturePopup";
 
 export const metadata: Metadata = {
   title: "CareerCurve",
@@ -17,6 +18,7 @@ export default function RootLayout({
       <body>
         <AuthHeader />
         {children}
+        <NewFeaturePopup />
       </body>
     </html>
   );

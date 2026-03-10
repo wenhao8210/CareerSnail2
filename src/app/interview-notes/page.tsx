@@ -8,7 +8,24 @@ import { useUser } from "@/hooks/useAuth";
 
 const STORAGE_KEY = "snail_career_interview_notes";
 
-type Entry = { id: string; title: string; content: string; createdAt: string };
+export type ChecklistItem = { text: string; checked: boolean };
+type Entry = {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  checklist?: ChecklistItem[];
+};
+
+/** 新建面试记录时的默认清单项 */
+const DEFAULT_CHECKLIST: ChecklistItem[] = [
+  { text: "确保过一遍常见问题", checked: false },
+  { text: "热身运动", checked: false },
+  { text: "确保打开面试笔记", checked: false },
+  { text: "确保录音", checked: false },
+  { text: "进入会议", checked: false },
+  { text: "准备好gemini", checked: false },
+];
 
 function loadEntries(): Entry[] {
   if (typeof window === "undefined") return [];
@@ -17,19 +34,30 @@ function loadEntries(): Entry[] {
     if (!raw) return [];
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
-    return arr.filter(
-      (x: unknown) =>
-        x &&
-        typeof x === "object" &&
-        "id" in x &&
-        "title" in x &&
-        "content" in x &&
-        "createdAt" in x &&
-        typeof (x as Entry).id === "string" &&
-        typeof (x as Entry).title === "string" &&
-        typeof (x as Entry).content === "string" &&
-        typeof (x as Entry).createdAt === "string"
-    ) as Entry[];
+    return arr
+      .filter(
+        (x: unknown) =>
+          x &&
+          typeof x === "object" &&
+          "id" in x &&
+          "title" in x &&
+          "content" in x &&
+          "createdAt" in x &&
+          typeof (x as Entry).id === "string" &&
+          typeof (x as Entry).title === "string" &&
+          typeof (x as Entry).content === "string" &&
+          typeof (x as Entry).createdAt === "string"
+      )
+      .map((x: Entry) => ({
+        ...x,
+        checklist: Array.isArray((x as Entry).checklist)
+          ? (x as Entry).checklist!.map((c) =>
+              c && typeof c === "object" && "text" in c && "checked" in c
+                ? { text: String(c.text), checked: Boolean(c.checked) }
+                : { text: "", checked: false }
+            ).filter((c) => c.text)
+          : DEFAULT_CHECKLIST.map((c) => ({ ...c })),
+      })) as Entry[];
   } catch {
     return [];
   }
@@ -112,16 +140,25 @@ export default function InterviewNotesPage() {
   const handleCreate = (title: string, content: string) => {
     const id = crypto.randomUUID?.() ?? `n-${Date.now()}`;
     const createdAt = new Date().toISOString();
-    setEntries((prev) => [...prev, { id, title, content, createdAt }]);
+    const checklist = DEFAULT_CHECKLIST.map((c) => ({ ...c }));
+    setEntries((prev) => [...prev, { id, title, content, createdAt, checklist }]);
     setShowNewForm(false);
     setSelectedId(id);
   };
 
-  const handleUpdate = (id: string, title: string, content: string) => {
+  const handleUpdate = (id: string, title: string, content: string, checklist?: ChecklistItem[]) => {
     setEntries((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, title, content } : e))
+      prev.map((e) =>
+        e.id === id ? { ...e, title, content, ...(checklist != null ? { checklist } : {}) } : e
+      )
     );
     setSelectedId(null);
+  };
+
+  const handleChecklistChange = (id: string, checklist: ChecklistItem[]) => {
+    setEntries((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, checklist } : e))
+    );
   };
 
   const handleDelete = (id: string) => {
@@ -171,7 +208,8 @@ export default function InterviewNotesPage() {
           {selected ? (
             <DetailView
               entry={selected}
-              onSave={(title, content) => handleUpdate(selected.id, title, content)}
+              onSave={(title, content, checklist) => handleUpdate(selected.id, title, content, checklist)}
+              onChecklistChange={(checklist) => handleChecklistChange(selected.id, checklist)}
               onDelete={() => handleDelete(selected.id)}
               onBack={() => setSelectedId(null)}
             />
@@ -273,17 +311,34 @@ function NewForm({
 function DetailView({
   entry,
   onSave,
+  onChecklistChange,
   onDelete,
   onBack,
 }: {
   entry: Entry;
-  onSave: (title: string, content: string) => void;
+  onSave: (title: string, content: string, checklist?: ChecklistItem[]) => void;
+  onChecklistChange: (checklist: ChecklistItem[]) => void;
   onDelete: () => void;
   onBack: () => void;
 }) {
+  const list = entry.checklist && entry.checklist.length > 0 ? entry.checklist : DEFAULT_CHECKLIST.map((c) => ({ ...c }));
   const [title, setTitle] = useState(entry.title);
   const [content, setContent] = useState(entry.content);
+  const [checklist, setChecklist] = useState<ChecklistItem[]>(list);
   const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    const next = entry.checklist && entry.checklist.length > 0 ? entry.checklist : DEFAULT_CHECKLIST.map((c) => ({ ...c }));
+    setChecklist(next);
+  }, [entry.id, entry.checklist]);
+
+  const toggleCheck = (index: number) => {
+    setChecklist((prev) => {
+      const next = prev.map((c, i) => (i === index ? { ...c, checked: !c.checked } : c));
+      if (!editing) setTimeout(() => onChecklistChange(next), 0);
+      return next;
+    });
+  };
 
   return (
     <div className="rounded-2xl border border-white/10 bg-black/30 p-4 sm:p-6">
@@ -294,13 +349,13 @@ function DetailView({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => (editing ? onSave(title, content) : setEditing(true))}
+            onClick={() => (editing ? onSave(title, content, checklist) : setEditing(true))}
             className="px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-600 text-white hover:bg-purple-500 transition"
           >
             {editing ? "保存" : "编辑"}
           </button>
           {editing && (
-            <button type="button" onClick={() => { setTitle(entry.title); setContent(entry.content); setEditing(false); }} className="px-3 py-1.5 rounded-lg text-sm text-slate-400 hover:bg-white/10">
+            <button type="button" onClick={() => { setTitle(entry.title); setContent(entry.content); setChecklist(entry.checklist?.length ? entry.checklist : DEFAULT_CHECKLIST.map((c) => ({ ...c }))); setEditing(false); }} className="px-3 py-1.5 rounded-lg text-sm text-slate-400 hover:bg-white/10">
               取消
             </button>
           )}
@@ -308,6 +363,25 @@ function DetailView({
             删除
           </button>
         </div>
+      </div>
+      {/* 面试前清单：一项一项勾选，勾选后自动保存 */}
+      <div className="mb-4 p-3 rounded-xl bg-white/5 border border-white/10">
+        <p className="text-xs font-medium text-slate-400 mb-2">面试前清单</p>
+        <ul className="space-y-2">
+          {checklist.map((item, i) => (
+            <li key={i} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={item.checked}
+                onChange={() => toggleCheck(i)}
+                className="w-4 h-4 rounded border-white/30 bg-white/10 text-purple-500 focus:ring-purple-500/50"
+              />
+              <span className={`text-sm ${item.checked ? "text-slate-500 line-through" : "text-slate-200"}`}>
+                {item.text}
+              </span>
+            </li>
+          ))}
+        </ul>
       </div>
       {editing ? (
         <>

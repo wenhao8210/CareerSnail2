@@ -409,8 +409,9 @@ export default function MockInterviewPage() {
   const progress = currentQuestions.length ? ((currentIndex + 1) / currentQuestions.length) * 100 : 0;
   const getCurrentProjectName = () => {
     if (currentProjectId === "default") return "默认题库";
+    if (!currentProjectId || projects.length === 0) return defaultProject.name;
     const p = projects.find((x) => x.id === currentProjectId);
-    return p?.name ?? "未知项目";
+    return p?.name ?? projects[0]?.name ?? defaultProject.name;
   };
 
   const handleCreateProject = async () => {
