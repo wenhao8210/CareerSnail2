@@ -8,6 +8,7 @@ import ButtonTreasure from "@/app/components/ButtonTreasure";
 import FeedbackDialog from "@/app/components/FeedbackDialog";
 import PomodoroTomato from "@/app/components/PomodoroTomato";
 import { track } from "@/lib/analytics";
+import { useUser } from "@/hooks/useAuth";
 
 const PX_PER_DAY = 100;
 const TASK_BLOCK_HEIGHT = 72;
@@ -363,6 +364,7 @@ function loadEverydayTasks(): EverydayTask[] {
 }
 
 export default function AgendaPage(): React.ReactNode {
+  const { user } = useUser();
   const [menuOpen, setMenuOpen] = useState(false);
   const [tasksFilter, setTasksFilter] = useState<"home" | "active" | "break" | "done" | "overview">("active");
   const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
@@ -979,6 +981,115 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
       localStorage.setItem(AGENDA_DIARY_KEY, JSON.stringify(diaryEntries));
     } catch {}
   }, [diaryEntries]);
+
+  // 登录后拉取云端小蜗日程；若云端为空且本地有则上传
+  useEffect(() => {
+    if (!user?.id || !hasHydratedFromStorageRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/sync/agenda");
+        if (cancelled) return;
+        const j = await r.json();
+        if (!r.ok) return;
+        const cloudTasks = Array.isArray(j.tasks) ? j.tasks : [];
+        const hasCloud = cloudTasks.length > 0 || (j.todayMemo && String(j.todayMemo).trim()) || (Array.isArray(j.everydayTasks) && j.everydayTasks.length > 0);
+        if (hasCloud) {
+          if (cloudTasks.length > 0) {
+            const list = cloudTasks.map((t: Record<string, unknown>) => ({
+              id: Number(t.id),
+              text: String(t.text ?? ""),
+              completed: Boolean(t.completed),
+              color: String(t.color ?? TASK_THEME_COLORS[0]),
+              date: t.date ? String(t.date) : undefined,
+              time: t.time ? String(t.time) : undefined,
+              note: t.note ? String(t.note) : undefined,
+              remarks: t.remarks ? String(t.remarks) : undefined,
+            }));
+            setTasks(list.filter((t) => t.text.length > 0).length > 0 ? list : INITIAL_TASKS);
+            try { localStorage.setItem(AGENDA_TASKS_KEY, JSON.stringify(list)); } catch {}
+          }
+          if (j.dateReminders && typeof j.dateReminders === "object") {
+            const dr: Record<string, "magenta" | "green" | null> = {};
+            for (const [k, v] of Object.entries(j.dateReminders)) {
+              if (v === "magenta" || v === "green" || v === null) dr[String(k)] = v;
+            }
+            setDateReminders(dr);
+            try { localStorage.setItem(AGENDA_DATE_REMINDERS_KEY, JSON.stringify(dr)); } catch {}
+          }
+          if (Array.isArray(j.everydayTasks) && j.everydayTasks.length > 0) {
+            const et = j.everydayTasks.map((t: Record<string, unknown>) => ({
+              id: String(t.id ?? ""),
+              name: String(t.name ?? ""),
+              emoji: String(t.emoji ?? getEmojiForTask(String(t.name ?? ""))),
+              color: String(t.color ?? EVERYDAY_TILE_COLORS[0]),
+              completedDates: Array.isArray(t.completedDates) ? t.completedDates.filter((x): x is string => typeof x === "string") : [],
+              moods: t.moods && typeof t.moods === "object" && !Array.isArray(t.moods) ? (t.moods as Record<string, string>) : {},
+            })).filter((t) => t.id);
+            setEverydayTasks(et);
+            try { localStorage.setItem(AGENDA_EVERYDAY_TASKS_KEY, JSON.stringify(et)); } catch {}
+          }
+          if (j.todayMemo !== undefined) {
+            const memo = String(j.todayMemo ?? "");
+            setTodayMemo(memo);
+            try { localStorage.setItem(AGENDA_TODAY_MEMO, memo); } catch {}
+          }
+          if (Array.isArray(j.pinnedUpcoming) && j.pinnedUpcoming.length <= PINNED_UPCOMING_MAX) {
+            const ids = j.pinnedUpcoming.filter((x: unknown) => typeof x === "number") as number[];
+            setPinnedUpcomingIds(ids);
+            try { localStorage.setItem(AGENDA_PINNED_UPCOMING, JSON.stringify(ids)); } catch {}
+          }
+          if (j.diary && typeof j.diary === "object" && !Array.isArray(j.diary)) {
+            const next: Record<string, string> = {};
+            for (const [k, v] of Object.entries(j.diary)) {
+              if (typeof k === "string" && typeof v === "string") next[k] = v;
+            }
+            setDiaryEntries(next);
+            try { localStorage.setItem(AGENDA_DIARY_KEY, JSON.stringify(next)); } catch {}
+          }
+        } else {
+          try {
+            const localTasks = typeof window !== "undefined" ? localStorage.getItem(AGENDA_TASKS_KEY) : null;
+            const localDr = typeof window !== "undefined" ? localStorage.getItem(AGENDA_DATE_REMINDERS_KEY) : null;
+            const localEt = typeof window !== "undefined" ? localStorage.getItem(AGENDA_EVERYDAY_TASKS_KEY) : null;
+            const localDiary = typeof window !== "undefined" ? localStorage.getItem(AGENDA_DIARY_KEY) : null;
+            const localMemo = typeof window !== "undefined" ? localStorage.getItem(AGENDA_TODAY_MEMO) : null;
+            const localPinned = typeof window !== "undefined" ? localStorage.getItem(AGENDA_PINNED_UPCOMING) : null;
+            const payload = {
+              tasks: localTasks ? JSON.parse(localTasks) : [],
+              dateReminders: localDr ? JSON.parse(localDr) : {},
+              everydayTasks: localEt ? JSON.parse(localEt) : [],
+              diary: localDiary ? JSON.parse(localDiary) : {},
+              todayMemo: localMemo ?? "",
+              pinnedUpcoming: localPinned ? JSON.parse(localPinned) : [],
+            };
+            fetch("/api/sync/agenda", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
+          } catch (_) {}
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  // 登录后日程变更时防抖上传
+  useEffect(() => {
+    if (!user?.id || !hasHydratedFromStorageRef.current) return;
+    const t = setTimeout(() => {
+      fetch("/api/sync/agenda", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tasks,
+          dateReminders,
+          everydayTasks,
+          diary: diaryEntries,
+          todayMemo,
+          pinnedUpcoming: pinnedUpcomingIds,
+        }),
+      }).catch(() => {});
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [user?.id, tasks, dateReminders, everydayTasks, diaryEntries, todayMemo, pinnedUpcomingIds]);
 
   // Overview 下保证当天日期列在横向滚动区域中间
   useEffect(() => {

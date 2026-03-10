@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import ButtonTreasure from "@/app/components/ButtonTreasure";
 import FeedbackDialog from "@/app/components/FeedbackDialog";
+import { useUser } from "@/hooks/useAuth";
 import { track } from "@/lib/analytics";
 import { QUESTION_BANK, AI_PM_QUESTION_BANK } from "@/lib/mock-interview/questionBank";
 import { generatePrompt, RESUME_CONTENT } from "@/lib/mock-interview/prompts";
@@ -195,6 +196,8 @@ export default function MockInterviewPage() {
   const [tutorialTipPos, setTutorialTipPos] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const prevProjectIdRef = useRef<string | null>(null);
+  /** 从搜索结果跳转时带上目标题库内的题目索引，避免被 effect 重置为 0 */
+  const searchResultIndexRef = useRef<{ projectId: string; index: number } | null>(null);
   const tutorialCardRef = useRef<HTMLDivElement>(null);
   const tutorialActionsRef = useRef<HTMLDivElement>(null);
   const tutorialCreateRef = useRef<HTMLButtonElement>(null);
@@ -202,6 +205,7 @@ export default function MockInterviewPage() {
   const tutorialTipRef = useRef<HTMLDivElement>(null);
   const [syncLoading, setSyncLoading] = useState<"up" | "down" | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const { user } = useUser();
   const storage = safeLocalStorage();
 
   useEffect(() => {
@@ -303,15 +307,94 @@ export default function MockInterviewPage() {
     storage.setItem(STORAGE_KEYS.totalLikes, String(totalLikeCount));
   }, [totalLikeCount]);
 
+  // 登录后拉取云端模拟面试扩展（自定义答案/笔记/错题/点赞）；若云端为空且本地有则上传
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/sync/flashcard-meta");
+        if (cancelled) return;
+        const j = await r.json();
+        if (!r.ok) return;
+        const hasCloud = (j.customAnswers && Object.keys(j.customAnswers).length > 0) ||
+          (j.questionNotes && Object.keys(j.questionNotes).length > 0) ||
+          (j.mistakes && Object.keys(j.mistakes).length > 0) ||
+          (typeof j.totalLikes === "number" && j.totalLikes > 0);
+        if (hasCloud) {
+          if (j.customAnswers && typeof j.customAnswers === "object") {
+            setCustomAnswers(j.customAnswers);
+            storage.setItem(STORAGE_KEYS.customAnswers, JSON.stringify(j.customAnswers));
+          }
+          if (j.questionNotes && typeof j.questionNotes === "object") {
+            setQuestionNotes(j.questionNotes);
+            storage.setItem(STORAGE_KEYS.questionNotes, JSON.stringify(j.questionNotes));
+          }
+          if (j.mistakes && typeof j.mistakes === "object") {
+            setMistakes(j.mistakes);
+            storage.setItem(STORAGE_KEYS.mistakes, JSON.stringify(j.mistakes));
+          }
+          if (typeof j.totalLikes === "number") {
+            setTotalLikeCount(j.totalLikes);
+            storage.setItem(STORAGE_KEYS.totalLikes, String(j.totalLikes));
+          }
+        } else {
+          const ca = storage.getItem(STORAGE_KEYS.customAnswers);
+          const qn = storage.getItem(STORAGE_KEYS.questionNotes);
+          const sm = storage.getItem(STORAGE_KEYS.mistakes);
+          const tl = storage.getItem(STORAGE_KEYS.totalLikes);
+          const hasLocal = (ca && ca !== "{}") || (qn && qn !== "{}") || (sm && sm !== "{}") || (tl && parseInt(tl, 10) > 0);
+          if (hasLocal) {
+            await fetch("/api/sync/flashcard-meta", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                customAnswers: ca ? JSON.parse(ca) : {},
+                questionNotes: qn ? JSON.parse(qn) : {},
+                mistakes: sm ? JSON.parse(sm) : {},
+                totalLikes: tl ? parseInt(tl, 10) || 0 : 0,
+              }),
+            });
+          }
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  // 登录后扩展数据变更时防抖上传
+  useEffect(() => {
+    if (!user?.id) return;
+    const t = setTimeout(() => {
+      fetch("/api/sync/flashcard-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customAnswers,
+          questionNotes,
+          mistakes,
+          totalLikes: totalLikeCount,
+        }),
+      }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [user?.id, customAnswers, questionNotes, mistakes, totalLikeCount]);
+
   useEffect(() => {
     if (currentProjectId) {
       const p = projects.find((x) => x.id === currentProjectId);
       if (p?.questions?.length) {
         setCurrentQuestions(p.questions);
-        const isProjectSwitch = prevProjectIdRef.current !== currentProjectId;
-        if (isProjectSwitch) {
-          prevProjectIdRef.current = currentProjectId;
-          setCurrentIndex(0);
+        const fromSearch = searchResultIndexRef.current && searchResultIndexRef.current.projectId === currentProjectId;
+        if (fromSearch) {
+          setCurrentIndex(searchResultIndexRef.current!.index);
+          searchResultIndexRef.current = null;
+        } else {
+          const isProjectSwitch = prevProjectIdRef.current !== currentProjectId;
+          if (isProjectSwitch) {
+            prevProjectIdRef.current = currentProjectId;
+            setCurrentIndex(0);
+          }
         }
       }
     }
@@ -1219,29 +1302,37 @@ export default function MockInterviewPage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="按题目、分类或答案搜索..."
+              placeholder="按题目、分类或答案搜索全部题库..."
               className="w-full bg-black/60 text-gray-100 px-4 py-3 rounded-xl border border-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400/50 placeholder:text-gray-500 mb-4"
             />
             <div className="flex-1 overflow-y-auto space-y-3 pb-20">
               {(() => {
                 const q = searchQuery.trim().toLowerCase();
+                type ItemWithSource = QuestionItem & { _projectId: string; _projectName: string; _indexInProject: number };
+                const allWithSource: ItemWithSource[] = projects.flatMap((p) =>
+                  (p.questions || []).map((item, index) => ({
+                    ...item,
+                    _projectId: p.id,
+                    _projectName: p.name,
+                    _indexInProject: index,
+                  }))
+                );
                 const list = q
-                  ? currentQuestions.filter(
+                  ? allWithSource.filter(
                       (item) =>
                         item.question.toLowerCase().includes(q) ||
                         (item.category || "").toLowerCase().includes(q) ||
                         (item.answer || "").toLowerCase().includes(q)
                     )
-                  : currentQuestions;
+                  : allWithSource;
                 if (list.length === 0) {
                   return (
                     <div className="text-center py-12 text-gray-500">
-                      {searchQuery.trim() ? "没有匹配的题目，试试其他关键词" : "输入关键词搜索当前题库中的题目"}
+                      {searchQuery.trim() ? "没有匹配的题目，试试其他关键词" : "输入关键词搜索全部题库中的题目"}
                     </div>
                   );
                 }
-                return list.map((item, idx) => {
-                  const globalIndex = currentQuestions.findIndex((x) => x.id === item.id);
+                return list.map((item) => {
                   const answerText = getDisplayAnswer(item.id, item.answer);
                   const matchInAnswer = q && answerText.toLowerCase().includes(q);
                   const answerSnippet = matchInAnswer && answerText
@@ -1249,20 +1340,26 @@ export default function MockInterviewPage() {
                     : "";
                   return (
                     <button
-                      key={item.id}
+                      key={`${item._projectId}-${item.id}`}
                       type="button"
                       onClick={() => {
-                        setCurrentIndex(globalIndex >= 0 ? globalIndex : 0);
+                        searchResultIndexRef.current = { projectId: item._projectId, index: item._indexInProject };
+                        setCurrentProjectId(item._projectId);
                         setView("card");
                         setIsFlipped(false);
                       }}
                       className="w-full text-left bg-black/60 hover:bg-black/80 p-4 rounded-xl border border-gray-700 hover:border-indigo-500/50 transition"
                     >
-                      <span className="inline-block px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-xs font-bold mb-2">
-                        {q && (item.category || "").toLowerCase().includes(q)
-                          ? highlightMatch(item.category || "通用", q)
-                          : (item.category || "通用")}
-                      </span>
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <span className="inline-block px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded text-xs font-bold">
+                          {q && (item.category || "").toLowerCase().includes(q)
+                            ? highlightMatch(item.category || "通用", q)
+                            : (item.category || "通用")}
+                        </span>
+                        <span className="text-xs text-gray-500" title={item._projectName}>
+                          {item._projectName}
+                        </span>
+                      </div>
                       <p className="text-gray-200 font-medium line-clamp-2">
                         {q ? highlightMatch(item.question, q) : item.question}
                       </p>

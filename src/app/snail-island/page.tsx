@@ -1,12 +1,16 @@
 "use client";
 
+/**
+ * 蜗牛岛 · 登录后云端同步地图；未登录仅本地存储。
+ */
 import React, { useState, useEffect, useRef } from "react";
+import { useUser } from "@/hooks/useAuth";
 
 const STORAGE_KEY = "snail_island_save";
 const ADMIN_PASSWORD = "8023";
 
-const GRID_SIZE = 24;
-const TILE_SIZE = 26;
+const GRID_SIZE = 28;
+const TILE_SIZE = 32;
 const CANVAS_SIZE = GRID_SIZE * TILE_SIZE;
 
 const COLORS: Record<string, string> = {
@@ -37,33 +41,32 @@ interface Cell {
   building: BuildingType;
 }
 
-export interface MapConfig {
-  islandRadius: number;
-  sandRing: number;
-  noise: number;
-}
+/** 巴黎式螺旋岛：同心岛 + 螺旋道路（蜗牛壳状），固定布局、像素风格 */
+function generateSpiralIsland(): Cell[][] {
+  const cx = GRID_SIZE / 2;
+  const cy = GRID_SIZE / 2;
+  const islandR = GRID_SIZE * 0.36;
+  const sandR = GRID_SIZE * 0.42;
+  const spiralB = (GRID_SIZE * 0.38) / (4 * Math.PI);
+  const roadWidth = 0.65;
 
-const DEFAULT_MAP_CONFIG: MapConfig = {
-  islandRadius: 0.35,
-  sandRing: 0.42,
-  noise: 2.5,
-};
-
-function generateIsland(config: MapConfig): Cell[][] {
-  const { islandRadius, sandRing, noise } = config;
   const newGrid: Cell[][] = [];
-  const centerX = GRID_SIZE / 2;
-  const centerY = GRID_SIZE / 2;
   for (let y = 0; y < GRID_SIZE; y++) {
     const row: Cell[] = [];
     for (let x = 0; x < GRID_SIZE; x++) {
-      const dx = x - centerX;
-      const dy = y - centerY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const n = Math.random() * noise - noise / 2;
+      const dx = x - cx;
+      const dy = y - cy;
+      const r = Math.sqrt(dx * dx + dy * dy);
       let type: CellType = "water";
-      if (dist < GRID_SIZE * islandRadius + n) type = "grass";
-      else if (dist < GRID_SIZE * sandRing + n) type = "sand";
+      if (r < islandR) type = "grass";
+      else if (r < sandR) type = "sand";
+
+      const theta = Math.atan2(dy, dx) + Math.PI;
+      const d1 = Math.abs(r - spiralB * theta);
+      const d2 = Math.abs(r - spiralB * (theta + 2 * Math.PI));
+      const distToSpiral = Math.min(d1, d2);
+      if (type !== "water" && distToSpiral < roadWidth) type = "road";
+
       row.push({ type, building: null });
     }
     newGrid.push(row);
@@ -131,32 +134,24 @@ function Tool({
   );
 }
 
-function loadSaved(): { grid: Cell[][]; mapConfig: MapConfig } | null {
+function loadSaved(): { grid: Cell[][] } | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const data = JSON.parse(raw) as { grid: Cell[][]; mapConfig: MapConfig };
-    if (!Array.isArray(data.grid) || !data.mapConfig) return null;
-    return {
-      grid: data.grid,
-      mapConfig: {
-        islandRadius: Number(data.mapConfig.islandRadius) || DEFAULT_MAP_CONFIG.islandRadius,
-        sandRing: Number(data.mapConfig.sandRing) ?? DEFAULT_MAP_CONFIG.sandRing,
-        noise: Number(data.mapConfig.noise) ?? DEFAULT_MAP_CONFIG.noise,
-      },
-    };
+    const data = JSON.parse(raw) as { grid: Cell[][]; mapConfig?: unknown };
+    if (!Array.isArray(data.grid)) return null;
+    const grid = data.grid as Cell[][];
+    if (grid.length !== GRID_SIZE || (grid[0]?.length ?? 0) !== GRID_SIZE) return null;
+    return { grid };
   } catch {
     return null;
   }
 }
 
-function saveToStorage(grid: Cell[][], mapConfig: MapConfig) {
+function saveToStorage(grid: Cell[][]) {
   try {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ grid, mapConfig })
-    );
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ grid }));
   } catch {}
 }
 
@@ -165,8 +160,8 @@ export default function SnailIslandPage() {
   const [activeCategory, setActiveCategory] = useState<"house" | "nature" | "terrain" | "none">("house");
   const [selectedTool, setSelectedTool] = useState<string>("house-1");
   const [grid, setGrid] = useState<Cell[][]>([]);
-  const [mapConfig, setMapConfig] = useState<MapConfig>(DEFAULT_MAP_CONFIG);
   const [hydrated, setHydrated] = useState(false);
+  const { user } = useUser();
 
   const [savePasswordModalOpen, setSavePasswordModalOpen] = useState(false);
   const [savePasswordInput, setSavePasswordInput] = useState("");
@@ -175,14 +170,52 @@ export default function SnailIslandPage() {
 
   useEffect(() => {
     const saved = loadSaved();
-    if (saved) {
-      setGrid(saved.grid);
-      setMapConfig(saved.mapConfig);
-    } else {
-      setGrid(generateIsland(DEFAULT_MAP_CONFIG));
-    }
+    if (saved) setGrid(saved.grid);
+    else setGrid(generateSpiralIsland());
     setHydrated(true);
   }, []);
+
+  // 登录后拉取云端蜗牛岛；若云端为空且本地有则上传
+  useEffect(() => {
+    if (!user?.id || !hydrated || grid.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/sync/snail-island");
+        if (cancelled) return;
+        const j = await r.json();
+        if (!r.ok) return;
+        const cloudGrid = Array.isArray(j.grid) ? j.grid : [];
+        if (cloudGrid.length === GRID_SIZE && cloudGrid[0]?.length === GRID_SIZE) {
+          setGrid(cloudGrid as Cell[][]);
+          saveToStorage(cloudGrid as Cell[][]);
+        } else {
+          const saved = loadSaved();
+          if (saved?.grid?.length) {
+            await fetch("/api/sync/snail-island", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ grid: saved.grid }),
+            });
+          }
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, hydrated]);
+
+  // 登录后地图变更时防抖上传
+  useEffect(() => {
+    if (!user?.id || grid.length === 0) return;
+    const t = setTimeout(() => {
+      fetch("/api/sync/snail-island", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grid }),
+      }).catch(() => {});
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [user?.id, grid]);
 
   const drawCottage = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
     const px = x * TILE_SIZE;
@@ -271,7 +304,8 @@ export default function SnailIslandPage() {
 
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
-        const cell = grid[y][x];
+        const cell = grid[y]?.[x];
+        if (!cell) continue;
         const px = x * TILE_SIZE;
         const py = y * TILE_SIZE;
 
@@ -281,7 +315,7 @@ export default function SnailIslandPage() {
         if (
           cell.type === "grass" &&
           y + 1 < GRID_SIZE &&
-          grid[y + 1][x].type !== "grass"
+          grid[y + 1]?.[x]?.type !== "grass"
         ) {
           ctx.fillStyle = COLORS.grassSide;
           ctx.fillRect(px, py + TILE_SIZE - 4, TILE_SIZE, 4);
@@ -323,18 +357,16 @@ export default function SnailIslandPage() {
     }
   };
 
-  const handleSaveImage = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const link = document.createElement("a");
-    link.download = "snail-island.png";
-    link.href = canvas.toDataURL("image/png");
-    link.click();
-  };
-
   const handleSaveWithPassword = () => {
     if (savePasswordInput.trim() === ADMIN_PASSWORD) {
-      saveToStorage(grid, mapConfig);
+      saveToStorage(grid);
+      if (user) {
+        fetch("/api/sync/snail-island", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ grid }),
+        }).catch(() => {});
+      }
       setSaveFeedback(true);
       setTimeout(() => setSaveFeedback(false), 2000);
       setSavePasswordModalOpen(false);
@@ -344,10 +376,6 @@ export default function SnailIslandPage() {
       setSavePasswordError(true);
       setSavePasswordInput("");
     }
-  };
-
-  const handleRegenerateIsland = () => {
-    setGrid(generateIsland(mapConfig));
   };
 
   if (!hydrated) {
@@ -364,36 +392,29 @@ export default function SnailIslandPage() {
       <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,rgba(139,92,246,0.08)_0%,transparent_60%)]" />
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:32px_32px]" />
 
-      <header className="relative z-10 flex items-center justify-between px-4 sm:px-6 py-4 bg-black/50 backdrop-blur-sm border-b border-purple-500/30">
-        <h1 className="text-lg sm:text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 whitespace-nowrap">
+      <header className="relative z-10 flex items-center justify-between px-6 py-4 bg-black/50 backdrop-blur-sm border-b border-purple-500/30">
+        <h1 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 whitespace-nowrap">
           🐌 SNAIL CAREER｜蜗牛岛
         </h1>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleSaveImage}
-            className="text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-xl transition shadow-lg shadow-purple-500/20"
-          >
-            导出图片
-          </button>
           <a
             href="/"
-            className="text-sm font-medium text-gray-400 hover:text-purple-400 transition"
+            className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:text-purple-400 hover:bg-white/5 border border-transparent hover:border-purple-500/30 transition"
           >
-            返回
+            返回首页
           </a>
         </div>
       </header>
 
-      <div className="relative z-10 flex-1 flex flex-col items-center p-4 pt-6 pb-8">
-        <div className="w-full max-w-2xl rounded-2xl border border-purple-500/30 bg-black/60 backdrop-blur-sm shadow-2xl shadow-purple-500/10 p-5 sm:p-6">
+      <div className="relative z-10 flex-1 flex flex-col items-center p-6 pt-6 pb-8">
+        <div className="w-full min-w-[640px] max-w-5xl rounded-2xl border border-purple-500/30 bg-black/60 backdrop-blur-sm shadow-2xl shadow-purple-500/10 p-6">
           <div className="flex flex-wrap justify-between items-end gap-4 mb-5">
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 tracking-tight">
                 像素城市
               </h2>
               <p className="text-[10px] text-gray-500 font-medium uppercase tracking-widest mt-1">
-                点击格子建造 · 一毫米也算前进
+                点击格子建造 · 螺旋道路 · 一毫米也算前进
               </p>
             </div>
           </div>
@@ -430,7 +451,7 @@ export default function SnailIslandPage() {
                 setSelectedTool("eraser");
                 setActiveCategory("none");
               }}
-              label="🧹"
+              label="橡皮擦"
             />
           </div>
 
@@ -503,94 +524,37 @@ export default function SnailIslandPage() {
             )}
             {activeCategory === "none" && (
               <p className="text-gray-500 text-xs font-medium italic">
-                选择工具后点击画布格子
+                已选橡皮擦 · 点击格子可清除该格建筑
               </p>
             )}
           </div>
 
-          {/* 地图特性：所有人可见；保存到本地需输入密码 */}
-          <div className="mb-5 p-4 rounded-xl border border-purple-500/30 bg-white/5">
-            <h3 className="text-sm font-bold text-purple-300 mb-3 flex items-center gap-2">
-              ⚙ 地图特性
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">岛屿半径</label>
-                <input
-                  type="range"
-                  min="0.2"
-                  max="0.5"
-                  step="0.01"
-                  value={mapConfig.islandRadius}
-                  onChange={(e) =>
-                    setMapConfig((c) => ({ ...c, islandRadius: parseFloat(e.target.value) }))
-                  }
-                  className="w-full accent-purple-500"
-                />
-                <span className="text-xs text-gray-500">{(mapConfig.islandRadius * 100).toFixed(0)}%</span>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">沙滩环宽</label>
-                <input
-                  type="range"
-                  min="0.32"
-                  max="0.55"
-                  step="0.01"
-                  value={mapConfig.sandRing}
-                  onChange={(e) =>
-                    setMapConfig((c) => ({ ...c, sandRing: parseFloat(e.target.value) }))
-                  }
-                  className="w-full accent-purple-500"
-                />
-                <span className="text-xs text-gray-500">{(mapConfig.sandRing * 100).toFixed(0)}%</span>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">边缘噪声</label>
-                <input
-                  type="range"
-                  min="0.5"
-                  max="5"
-                  step="0.1"
-                  value={mapConfig.noise}
-                  onChange={(e) =>
-                    setMapConfig((c) => ({ ...c, noise: parseFloat(e.target.value) }))
-                  }
-                  className="w-full accent-purple-500"
-                />
-                <span className="text-xs text-gray-500">{mapConfig.noise.toFixed(1)}</span>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={handleRegenerateIsland}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white/10 hover:bg-white/20 border border-white/20 text-gray-200 transition"
-              >
-                重新生成岛屿
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSavePasswordError(false);
-                  setSavePasswordInput("");
-                  setSavePasswordModalOpen(true);
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition"
-              >
-                {saveFeedback ? "已保存" : "保存到本地"}
-              </button>
-            </div>
+          <div className="mb-5 flex justify-end items-center gap-3">
+            <span className="text-[10px] text-gray-500">进度仅存于本机，保存需输入密码</span>
+            <button
+              type="button"
+              onClick={() => {
+                setSavePasswordError(false);
+                setSavePasswordInput("");
+                setSavePasswordModalOpen(true);
+              }}
+              className="px-4 py-2 rounded-lg text-sm font-bold bg-purple-600 hover:bg-purple-500 text-white transition shadow-lg shadow-purple-500/20"
+            >
+              {saveFeedback ? "已保存" : "保存进度"}
+            </button>
           </div>
 
-          <div className="flex justify-center rounded-xl overflow-hidden border-2 border-purple-500/30 bg-[#0f0f12] p-3 sm:p-4">
+          <div className="flex justify-center rounded-xl overflow-hidden border-2 border-purple-500/30 bg-[#0f0f12] p-4">
             <div className="rounded-lg overflow-hidden border border-white/10 shadow-2xl">
               <canvas
                 ref={canvasRef}
                 width={CANVAS_SIZE}
                 height={CANVAS_SIZE}
                 onClick={handleCanvasClick}
-                className="cursor-pointer block"
+                className="block cursor-crosshair"
                 style={{ imageRendering: "pixelated" }}
+                title="点击格子建造或清除"
+                aria-label="蜗牛岛像素地图，点击格子放置建筑或地形"
               />
             </div>
           </div>
@@ -611,8 +575,8 @@ export default function SnailIslandPage() {
             className="w-full max-w-xs rounded-2xl border border-purple-500/40 bg-gray-900/95 p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <p className="text-sm font-bold text-purple-300 mb-3">保存到本地</p>
-            <p className="text-xs text-gray-400 mb-3">输入密码以保存当前地图进度</p>
+            <p className="text-sm font-bold text-purple-300 mb-3">保存进度</p>
+            <p className="text-xs text-gray-400 mb-3">输入密码后，当前地图将保存到本机 · 按 Esc 关闭</p>
             <input
               type="password"
               inputMode="numeric"

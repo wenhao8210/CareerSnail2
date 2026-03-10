@@ -31,6 +31,26 @@ export function appendToHistory(record: AnalysisRecord): void {
   }
 }
 
+/** 覆盖本地历史（用于云端拉取后回写） */
+export function setHistory(records: AnalysisRecord[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.isArray(records) ? records : []));
+  } catch (e) {
+    console.warn("写入历史记录失败", e);
+  }
+}
+
+/** 清空全部历史记录，恢复起始状态 */
+export function clearHistory(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch (e) {
+    console.warn("清空历史记录失败", e);
+  }
+}
+
 /** 岗位名称脱敏：保留首尾字，中间用 * 替代 */
 export function maskRoleName(role: string): string {
   const s = String(role).trim();

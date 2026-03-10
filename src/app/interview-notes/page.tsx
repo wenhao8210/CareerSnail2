@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { X } from "lucide-react";
 import ButtonTreasure from "@/app/components/ButtonTreasure";
+import { useUser } from "@/hooks/useAuth";
 
 const STORAGE_KEY = "snail_career_interview_notes";
 
@@ -48,16 +49,60 @@ export default function InterviewNotesPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
+  const { user } = useUser();
 
   useEffect(() => {
     setEntries(loadEntries());
     loadedRef.current = true;
   }, []);
 
+  // 登录后拉取云端面试复盘；若云端为空且本地有则上传
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/sync/interview-notes");
+        if (cancelled) return;
+        const j = await r.json();
+        if (!r.ok) return;
+        const list = Array.isArray(j.entries) ? j.entries : [];
+        if (list.length > 0) {
+          const valid = list.filter(
+            (x: unknown) =>
+              x && typeof x === "object" && "id" in x && "title" in x && "content" in x && "createdAt" in x
+          ) as Entry[];
+          setEntries(valid);
+          saveEntries(valid);
+        } else {
+          const local = loadEntries();
+          if (local.length > 0) {
+            await fetch("/api/sync/interview-notes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ entries: local }),
+            });
+          }
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
   useEffect(() => {
     if (!loadedRef.current) return;
     saveEntries(entries);
-  }, [entries]);
+    if (user?.id) {
+      const t = setTimeout(() => {
+        fetch("/api/sync/interview-notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entries }),
+        }).catch(() => {});
+      }, 800);
+      return () => clearTimeout(t);
+    }
+  }, [entries, user?.id]);
 
   const sortedEntries = [...entries].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()

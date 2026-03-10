@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import { useUser } from "@/hooks/useAuth";
 import "./ButtonTreasure.scss";
 
 const COIN_STORAGE_KEY = "snail_career_coin_count";
@@ -43,13 +44,68 @@ function setTodayClicks(count: number): void {
 export default function ButtonTreasure() {
   const [coins, setCoins] = useState<{ id: number }[]>([]);
   const [totalCoins, setTotalCoins] = useState(0);
-  const [todayClicks, setTodayClicksState] = useState(0);
+  const [todayClicksState, setTodayClicksState] = useState(0);
   const [easterEggCount, setEasterEggCount] = useState(0);
+  const { user } = useUser();
 
   useEffect(() => {
     setTotalCoins(getStoredCoinCount());
     setTodayClicksState(getTodayClicks());
   }, []);
+
+  // 登录后拉取云端金币；若云端为空且本地有则上传
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/sync/coins");
+        if (cancelled) return;
+        const j = await r.json();
+        if (!r.ok) return;
+        const cloudCount = typeof j.coinCount === "number" ? j.coinCount : 0;
+        const cloudDate = j.dailyDate ?? null;
+        const cloudDaily = typeof j.dailyCount === "number" ? j.dailyCount : 0;
+        const todayStr = getTodayStr();
+        if (cloudCount > 0 || cloudDate || cloudDaily > 0) {
+          setTotalCoins(cloudCount);
+          try { localStorage.setItem(COIN_STORAGE_KEY, String(cloudCount)); } catch {}
+          const dailyCount = cloudDate === todayStr ? cloudDaily : 0;
+          setTodayClicksState(dailyCount);
+          setTodayClicks(dailyCount);
+        } else {
+          const localTotal = getStoredCoinCount();
+          const localDaily = getTodayClicks();
+          const localDate = getTodayStr();
+          if (localTotal > 0 || localDaily > 0) {
+            await fetch("/api/sync/coins", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ coinCount: localTotal, dailyDate: localDate, dailyCount: localDaily }),
+            });
+          }
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  // 登录后金币/每日点击变更时防抖上传
+  useEffect(() => {
+    if (!user?.id) return;
+    const t = setTimeout(() => {
+      fetch("/api/sync/coins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          coinCount: totalCoins,
+          dailyDate: getTodayStr(),
+          dailyCount: todayClicksState,
+        }),
+      }).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [user?.id, totalCoins, todayClicksState]);
 
   const handleClick = () => {
     const current = getTodayClicks();
@@ -94,9 +150,9 @@ export default function ButtonTreasure() {
           <div key={coin.id} className="coin-down" />
         ))}
       </div>
-      <span className="text-sm text-gray-400 whitespace-nowrap" title={`今日已点 ${todayClicks}/${DAILY_CLICK_LIMIT} 次`}>
+      <span className="text-sm text-gray-400 whitespace-nowrap" title={`今日已点 ${todayClicksState}/${DAILY_CLICK_LIMIT} 次`}>
         🪙 金币：<span className="text-yellow-400 font-semibold">{totalCoins}</span>
-        <span className="text-gray-500 text-xs ml-0.5">({todayClicks}/{DAILY_CLICK_LIMIT})</span>
+        <span className="text-gray-500 text-xs ml-0.5">({todayClicksState}/{DAILY_CLICK_LIMIT})</span>
       </span>
     </div>
   );
