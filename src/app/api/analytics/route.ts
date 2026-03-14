@@ -50,9 +50,10 @@ export async function POST(req: Request) {
     console.log("[analytics] Event:", event, props);
 
     // 尝试写入 Supabase（如果配置了）
-    const supabase = getSupabaseClient();
+    const supabase = getSupabaseClient() as ReturnType<typeof createClient> | null;
     if (supabase) {
-      const { error } = await supabase.from("analytics_events").insert([
+      const analyticsTable = supabase.from("analytics_events") as any;
+      const { error } = await analyticsTable.insert([
         { event, props },
       ]);
       if (error) {
