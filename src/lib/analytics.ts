@@ -6,7 +6,15 @@ export type AnalyticsEvent =
   | "resume_analysis_complete"
   | "mock_interview_deck_created"
   | "mock_interview_card_flip"
-  | "agenda_task_created";
+  | "agenda_task_created"
+  // 能力画像漏斗事件
+  | "profile_test_started"
+  | "profile_resume_uploaded"
+  | "profile_questions_completed"
+  | "profile_report_generated"
+  | "profile_share_clicked"
+  | "profile_pdf_downloaded"
+  | "profile_save_clicked";
 
 export type AnalyticsProps = Record<string, string | number | boolean | undefined>;
 
@@ -30,7 +38,11 @@ export function track(event: AnalyticsEvent, props?: AnalyticsProps): void {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ event, props: props ?? {} }),
     keepalive: true,
-  }).catch(() => {});
+  })
+    .then(() => {
+      window.dispatchEvent(new CustomEvent("snail-analytics-tracked"));
+    })
+    .catch(() => {});
 
   if (process.env.NODE_ENV === "development") {
     console.log("[analytics]", payload);

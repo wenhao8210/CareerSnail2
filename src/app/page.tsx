@@ -1,15 +1,64 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import AnalyzingTips from "./components/AnalyzingTips";
 import AnalysisPanel from "./components/AnalysisPanel";
+import TalentProfilePanel, { type TalentProfileData } from "./components/TalentProfilePanel";
 import ButtonTreasure from "./components/ButtonTreasure";
 import FeedbackDialog from "./components/FeedbackDialog";
+import TodayLoginCount from "./components/TodayLoginCount";
 import HistoryChart from "./components/HistoryChart";
 import { getHistory, appendToHistory, clearHistory, setHistory, maskRoleName, type AnalysisRecord } from "@/lib/historyStorage";
 import { useUser } from "@/hooks/useAuth";
 import { track } from "@/lib/analytics";
 
 const CLIPBOARD_STORAGE_KEY = "snail_career_clipboard";
+const FEATURE_BANNER_STORAGE_KEY = "snail_feature_banner_seen_2026_03_14";
+
+const FEATURE_BANNER_VERSIONS = [
+  {
+    id: "2026-03-14",
+    badge: "3 月 14 日 上新",
+    title: "新功能上线",
+    intro: "这次不是只看分数了，你现在可以直接生成更完整、更有传播性的能力画像报告：",
+    items: [
+      "AI 能力画像报告：一句定位、五维图谱、高光短板、竞争位置分布",
+      "动态追问题流：按岗位方向出题，前面回答会影响后面的问题内容",
+      "作品集辅助判断：支持补充作品集链接或上传文件一起分析",
+      "分享能力增强：分享卡片、图谱判词、浏览器打印导出 PDF",
+    ],
+  },
+  {
+    id: "2026-03-11",
+    badge: "3 月 11 日 上新",
+    title: "新功能上线",
+    intro: "春招季来了，我们为你准备了这些新能力：",
+    items: [
+      "春招投递剪贴板 — 一键填充简历信息",
+      "模拟面试 — 刷题、错题本、自定义题库",
+      "小蜗日程 — 任务与番茄钟 Focus 模式",
+      "面试复盘 — 面试记录与考前清单",
+    ],
+  },
+] as const;
+
+/** 从 LLM 输出中提取 JSON（可能被 ```json ... ``` 包裹） */
+function extractJsonFromText(text: string): string | null {
+  const trimmed = String(text ?? "").trim();
+  const jsonBlock = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (jsonBlock) return jsonBlock[1].trim();
+  const braceStart = trimmed.indexOf("{");
+  if (braceStart >= 0) {
+    let depth = 0;
+    for (let i = braceStart; i < trimmed.length; i++) {
+      if (trimmed[i] === "{") depth++;
+      if (trimmed[i] === "}") {
+        depth--;
+        if (depth === 0) return trimmed.slice(braceStart, i + 1);
+      }
+    }
+  }
+  return null;
+}
 
 type EducationItem = {
   学校名称: string;
@@ -49,18 +98,33 @@ const SAMPLE_HISTORY_RECORDS: AnalysisRecord[] = [
   { role: "UI 设计师", score: 9.0, date: new Date().toISOString(), rankPercent: 92, total: 100 },
 ];
 
-/** 简历分析 Tab 的示例报告（仅供参考） */
-const SAMPLE_ANALYSIS_DATA = {
+/** 能力画像示例数据（用于示例报告预览，新 JSON 结构） */
+const SAMPLE_TALENT_PROFILE: TalentProfileData = {
+  oneSentencePosition: "具备商业化敏感度的 AI 产品潜力型选手",
+  summary: "在当前的 AI 人才市场中，纯技术背景的候选人往往缺乏对用户情绪的感知，而传统互联网产品经理又容易受限于「确定性」的路径依赖。你的核心壁垒在于：以建筑与景观设计的空间体验为底色，以「Vibe Coding」的敏捷开发为武器，通过三段从底层到应用层的核心大厂实习，构建了极度务实的 AI 商业化与评测调优思维。",
+  hexagonScores: {
+    education: 4.5,
+    experience: 4.2,
+    projectDescription: 4.0,
+    achievements: 3.8,
+    jobMatch: 4.2,
+  },
+  topHighlight: {
+    title: "大厂 AI 产品实习",
+    content: "独立完成 LLM 评测体系搭建，将评测效率提升 40%，体现从 0 到 1 的落地能力",
+  },
+  topRisk: {
+    issue: "成果量化不足",
+    impact: "简历中定性描述多，难以通过初筛",
+  },
+  talentTags: {
+    direction: "AI产品经理",
+    archetype: "潜力型",
+    riskLevel: "medium",
+  },
+  overallMatch: 8.4,
   rankPercent: 82.3,
   total: 100,
-  教育背景: 4.5,
-  实习与项目经验: 4.2,
-  项目描述: 4.0,
-  成就与量化指标: 3.8,
-  荣誉与闪光点: 3.5,
-  综合匹配度: 8.4,
-  简历总结:
-    "你的教育背景与目标岗位整体匹配度较高，具备相关的专业基础和完整的学习经历。实习与项目经验覆盖了核心技能点，但在成果量化和个人贡献的突出上还有提升空间。建议补充更多「数字化」的成果（如转化率、效率提升、营收贡献等），并用 2～3 句总结出你在团队中的独特价值，这将显著提升简历在筛选环节的通过率。",
 };
 
 const 学历选项 = ["高中", "专科", "本科", "硕士", "博士"] as const;
@@ -306,7 +370,267 @@ function NeonSearchBar({
   );
 }
 
+type QuestionOption = {
+  value: string;
+  label: string;
+  desc: string;
+};
+
+type QuestionFlowContext = {
+  role: string;
+  answers: Record<string, string>;
+  hasPortfolio: "" | "yes" | "no";
+};
+
+// 能力画像问题类型
+type QuestionItem = {
+  id: string;
+  stage: "base" | "role" | "followup";
+  type: "text" | "choice";
+  question?: string;
+  placeholder?: string;
+  options?: QuestionOption[];
+  roles?: string[];
+  helperText?: string;
+  getQuestion?: (ctx: QuestionFlowContext) => string;
+  getPlaceholder?: (ctx: QuestionFlowContext) => string;
+  shouldShow?: (ctx: QuestionFlowContext) => boolean;
+};
+
+// 团队角色选项
+const TEAM_ROLE_OPTIONS: QuestionOption[] = [
+  { value: "leader", label: "统筹者", desc: "擅长定目标、分工、把控进度" },
+  { value: "executor", label: "执行者", desc: "擅长把想法落地、追求效率" },
+  { value: "creative", label: "创意者", desc: "擅长出点子、设计体验、发现问题" },
+  { value: "coordinator", label: "协调者", desc: "擅长沟通、润滑关系、处理冲突" },
+  { value: "analyst", label: "分析者", desc: "擅长数据、逻辑、深度思考" },
+  { value: "supporter", label: "支持者", desc: "擅长补位、兜底、默默推进" },
+];
+
+// AI 模型选项
+const AI_MODEL_OPTIONS = [
+  {
+    value: "gpt-5",
+    label: "OpenAI GPT-5",
+    desc: "OpenAI 最新模型，综合能力最强",
+    provider: "openai",
+  },
+  {
+    value: "Qwen/Qwen3-235B-A22B-Instruct-2507",
+    label: "通义千问 3 (235B)",
+    desc: "硅基流动 - 阿里最新大模型，中文理解优秀",
+    provider: "siliconflow",
+  },
+];
+
+const BASE_PROFILE_QUESTIONS: QuestionItem[] = [
+  {
+    id: "best_result",
+    stage: "base",
+    question: "你最能证明自己能力的一段经历是什么？",
+    placeholder: "请用 STAR 方式回答：背景、你的动作、结果；尽量带数字或外部反馈...",
+    type: "text",
+    helperText: "这题主要看结果证据和个人贡献，不要只写“参与了什么”。",
+  },
+  {
+    id: "role_in_team",
+    stage: "base",
+    question: "在团队里你通常扮演什么角色？",
+    type: "choice",
+    options: TEAM_ROLE_OPTIONS,
+  },
+  {
+    id: "why_fit",
+    stage: "base",
+    getQuestion: (ctx) => `如果面试官问「为什么你适合${ctx.role === "other" ? "这个方向" : "这个岗位方向"}」，你会怎么回答？`,
+    placeholder: "不要泛泛而谈，最好给出一段和岗位直接相关的经历或证据...",
+    type: "text",
+    helperText: "这题主要看岗位动机是否真实，以及和过往经历是否对得上。",
+  },
+];
+
+const ROLE_SPECIFIC_QUESTIONS: QuestionItem[] = [
+  {
+    id: "product_problem_definition",
+    stage: "role",
+    roles: ["product", "ai_product"],
+    question: "给你一个模糊需求时，你会怎么定义问题、拆清目标，再决定先做什么？",
+    placeholder: "举一段真实经历，说明你如何界定用户问题、目标和优先级...",
+    type: "text",
+  },
+  {
+    id: "product_tradeoff",
+    stage: "role",
+    roles: ["product", "ai_product"],
+    question: "你做过一次什么需求取舍？你砍掉了什么，为什么？",
+    placeholder: "不要只说“平衡了资源”，请说清楚你的判断依据和最终影响...",
+    type: "text",
+  },
+  {
+    id: "operation_growth_case",
+    stage: "role",
+    roles: ["operation"],
+    question: "你做过最像“运营动作”的一次增长或转化提升是什么？",
+    placeholder: "请说清楚目标指标、具体动作、结果，以及你亲自负责了哪部分...",
+    type: "text",
+  },
+  {
+    id: "operation_reuse",
+    stage: "role",
+    roles: ["operation"],
+    question: "做完一次活动或增长实验后，你通常会沉淀什么可以复用的东西？",
+    placeholder: "例如方法论、SOP、渠道判断、内容模板、复盘机制等...",
+    type: "text",
+  },
+  {
+    id: "data_diagnosis",
+    stage: "role",
+    roles: ["data"],
+    question: "如果某个核心指标突然异常，你第一步会怎么排查？",
+    placeholder: "说明你会先看什么、怎么切维度、如何判断是数据问题还是业务问题...",
+    type: "text",
+  },
+  {
+    id: "data_business_value",
+    stage: "role",
+    roles: ["data"],
+    question: "你做过最有业务价值的一次分析是什么？",
+    placeholder: "不要只讲分析过程，要说明分析结论最终推动了什么业务动作...",
+    type: "text",
+  },
+  {
+    id: "development_debug",
+    stage: "role",
+    roles: ["development"],
+    question: "你独立排查过最复杂的一次技术问题是什么？",
+    placeholder: "请说明现象、排查路径、定位依据，以及最后如何修复...",
+    type: "text",
+  },
+  {
+    id: "development_ownership",
+    stage: "role",
+    roles: ["development"],
+    question: "你做过哪个项目最能体现你的独立负责能力？",
+    placeholder: "说清楚真正由你独立负责的模块，而不是团队整体完成了什么...",
+    type: "text",
+  },
+  {
+    id: "design_balance",
+    stage: "role",
+    roles: ["design"],
+    question: "你怎么平衡视觉效果、用户体验和实现成本？",
+    placeholder: "请举一个真实项目，说清楚你做过的取舍，而不是只谈设计理念...",
+    type: "text",
+  },
+  {
+    id: "design_portfolio_case",
+    stage: "role",
+    roles: ["design"],
+    question: "你最希望面试官看你哪个作品？为什么它最能代表你？",
+    placeholder: "可以从问题定义、方案迭代、最终效果三个层面回答...",
+    type: "text",
+  },
+  {
+    id: "other_transfer_reason",
+    stage: "role",
+    roles: ["other"],
+    question: "你为什么想投这个方向，而不是继续沿着原来的经历走？",
+    placeholder: "如果是转岗，请直接讲转岗原因、已有积累，以及现在最大的差距...",
+    type: "text",
+  },
+  {
+    id: "other_role_evidence",
+    stage: "role",
+    roles: ["other"],
+    question: "你现在手里有什么证据，能证明自己不是“只想试试”这个方向？",
+    placeholder: "例如相关项目、实习、作品、研究、输出内容等...",
+    type: "text",
+  },
+];
+
+const FOLLOWUP_PROFILE_QUESTIONS: QuestionItem[] = [
+  {
+    id: "portfolio_showcase",
+    stage: "followup",
+    type: "text",
+    shouldShow: (ctx) => ctx.hasPortfolio === "yes",
+    getQuestion: (ctx) => `如果只能让面试官看你作品集里的一个内容，你最希望他看什么？为什么它最能说明你适合${ctx.role === "other" ? "这个方向" : "这个岗位"}？`,
+    placeholder: "说清楚这个作品对应的问题、你的角色和最能证明你的部分...",
+  },
+  {
+    id: "portfolio_gap",
+    stage: "followup",
+    type: "text",
+    shouldShow: (ctx) => ctx.hasPortfolio === "no",
+    getQuestion: (ctx) => `你目前没有作品集，如果现在去投${ctx.role === "other" ? "这个方向" : "这个岗位"}，你最担心面试官质疑你哪一点？`,
+    placeholder: "直接回答最大的缺口，不要写“都还好”这种空话...",
+  },
+  {
+    id: "team_role_followup",
+    stage: "followup",
+    type: "text",
+    shouldShow: (ctx) => !!ctx.answers.role_in_team,
+    getQuestion: (ctx) => {
+      const roleLabel = ctx.answers.role_in_team;
+      if (roleLabel === "统筹者") return "你最近一次作为统筹者推进事情落地时，具体是怎么拆分任务和对齐节奏的？";
+      if (roleLabel === "执行者") return "你最近一次把一个模糊想法真正落地时，第一步做了什么，最后产出了什么？";
+      if (roleLabel === "创意者") return "你最近一次提出一个新方案并被采纳时，为什么它能成立？";
+      if (roleLabel === "协调者") return "你最近一次解决分歧或推动多方协作时，是怎么把事情推进下去的？";
+      if (roleLabel === "分析者") return "你最近一次靠分析判断推动一个结论时，怎么证明你的判断是靠谱的？";
+      if (roleLabel === "支持者") return "你最近一次在团队中补位或兜底时，具体补了哪个关键缺口？";
+      return "结合你在团队中的常见角色，再讲一个能证明这点的具体例子。";
+    },
+    placeholder: "尽量聚焦一件事，讲清楚你的动作和结果...",
+  },
+  {
+    id: "result_evidence_followup",
+    stage: "followup",
+    type: "text",
+    shouldShow: (ctx) => !!ctx.answers.best_result && !/\d/.test(ctx.answers.best_result),
+    question: "你刚才提到的那段经历里，有没有任何可量化结果、外部反馈或可验证证据？",
+    placeholder: "哪怕没有精确数字，也请给出可验证的结果信号，例如上线、被采纳、复用、获奖、正反馈...",
+  },
+  {
+    id: "fit_detail_followup",
+    stage: "followup",
+    type: "text",
+    shouldShow: (ctx) => (ctx.answers.why_fit || "").trim().length > 0 && (ctx.answers.why_fit || "").trim().length < 20,
+    getQuestion: (ctx) => `你刚才对“为什么适合${ctx.role === "other" ? "这个方向" : "这个岗位"}”回答得比较泛。请补一个最直接的例子证明你的岗位相关性。`,
+    placeholder: "请用一段具体经历回答，不要再写抽象形容词...",
+  },
+];
+
+// 目标岗位选项
+const TARGET_DIRECTIONS = [
+  { value: "product", label: "产品经理", icon: "📱" },
+  { value: "operation", label: "运营", icon: "🚀" },
+  { value: "data", label: "数据分析", icon: "📊" },
+  { value: "development", label: "开发", icon: "💻" },
+  { value: "ai_product", label: "AI产品", icon: "🤖" },
+  { value: "design", label: "设计", icon: "🎨" },
+  { value: "other", label: "其他", icon: "🔍" },
+];
+
+function getQuestionRoleKey(selectedDirection: string) {
+  return selectedDirection || "other";
+}
+
+function getDynamicQuestions(role: string, answers: Record<string, string>, hasPortfolio: "" | "yes" | "no") {
+  const ctx: QuestionFlowContext = { role, answers, hasPortfolio };
+  const roleQuestions = ROLE_SPECIFIC_QUESTIONS.filter((item) => !item.roles || item.roles.includes(role)).slice(0, 2);
+  const followupQuestions = FOLLOWUP_PROFILE_QUESTIONS
+    .filter((item) => (item.shouldShow ? item.shouldShow(ctx) : true))
+    .slice(0, 2);
+
+  return [...BASE_PROFILE_QUESTIONS, ...roleQuestions, ...followupQuestions].map((item) => ({
+    ...item,
+    question: item.getQuestion ? item.getQuestion(ctx) : item.question || "",
+    placeholder: item.getPlaceholder ? item.getPlaceholder(ctx) : item.placeholder,
+  }));
+}
+
 export default function Home() {
+  // ===== 原有状态 =====
   const [file, setFile] = useState<File | null>(null);
   const [targetRole, setTargetRole] = useState("");
   const [jdText, setJdText] = useState("");
@@ -328,8 +652,28 @@ export default function Home() {
   const [clipboardPasteText, setClipboardPasteText] = useState("");
   const [clipboardSaveTip, setClipboardSaveTip] = useState("");
   const [clipboardCopyTip, setClipboardCopyTip] = useState(false);
+  const [showFeatureBanner, setShowFeatureBanner] = useState(false);
+  const [selectedFeatureVersion, setSelectedFeatureVersion] = useState<(typeof FEATURE_BANNER_VERSIONS)[number]["id"]>("2026-03-14");
   const importInputRef = useRef<HTMLInputElement>(null);
   const { user } = useUser();
+
+  // ===== 能力画像新状态 =====
+  const [currentStep, setCurrentStep] = useState<"upload" | "direction" | "questions" | "analyzing" | "result">("upload");
+  const [selectedDirection, setSelectedDirection] = useState("");
+  const [hasPortfolio, setHasPortfolio] = useState<"" | "yes" | "no">("");
+  const [portfolioLink, setPortfolioLink] = useState("");
+  const [portfolioFile, setPortfolioFile] = useState<File | null>(null);
+  const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [talentProfile, setTalentProfile] = useState<TalentProfileData | null>(null);
+  const [showSample, setShowSample] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("gpt-5"); // 默认使用 GPT-5
+  const dynamicQuestions = useMemo(
+    () => getDynamicQuestions(getQuestionRoleKey(selectedDirection), questionAnswers, hasPortfolio),
+    [selectedDirection, questionAnswers, hasPortfolio]
+  );
+  const currentQuestion = dynamicQuestions[currentQuestionIndex];
+  const activeFeatureBanner = FEATURE_BANNER_VERSIONS.find((item) => item.id === selectedFeatureVersion) || FEATURE_BANNER_VERSIONS[0];
 
   const resizeTextareaToContent = (el: HTMLTextAreaElement | null) => {
     if (!el) return;
@@ -352,8 +696,31 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const seen = localStorage.getItem(FEATURE_BANNER_STORAGE_KEY);
+      if (!seen) setShowFeatureBanner(true);
+    } catch {
+      setShowFeatureBanner(true);
+    }
+  }, []);
+
+  useEffect(() => {
     if (mainTab === "history") setHistoryRecords(getHistory());
   }, [mainTab]);
+
+  const closeFeatureBanner = () => {
+    setShowFeatureBanner(false);
+    try {
+      localStorage.setItem(FEATURE_BANNER_STORAGE_KEY, "1");
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (currentQuestionIndex >= dynamicQuestions.length) {
+      setCurrentQuestionIndex(Math.max(dynamicQuestions.length - 1, 0));
+    }
+  }, [currentQuestionIndex, dynamicQuestions.length]);
 
   // 登录后拉取云端剪贴板；若云端为空且本地有数据则上传
   useEffect(() => {
@@ -464,6 +831,120 @@ export default function Home() {
     return () => clearInterval(timer!);
   }, [loading]);
 
+  // 能力画像生成函数
+  async function handleProfileGenerate() {
+    if (!file) return;
+    setCurrentStep("analyzing");
+    setLoading(true);
+    setSeconds(0);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("target_role", targetRole);
+      formData.append("jd", jdText);
+      formData.append("has_portfolio", hasPortfolio || "no");
+      if (portfolioLink.trim()) formData.append("portfolio_link", portfolioLink.trim());
+      if (portfolioFile) formData.append("portfolio_file", portfolioFile);
+      // 追加结构化问题答案
+      formData.append(
+        "question_answers",
+        JSON.stringify({
+          roleKey: getQuestionRoleKey(selectedDirection),
+          targetRole: targetRole.trim(),
+          hasPortfolio,
+          portfolioLink: portfolioLink.trim(),
+          questions: dynamicQuestions.map((item) => ({
+            id: item.id,
+            stage: item.stage,
+            question: item.question,
+            answer: questionAnswers[item.id] || "",
+          })),
+          rawAnswers: questionAnswers,
+        })
+      );
+      formData.append("mode", "talent_profile"); // 标记为能力画像模式
+      formData.append("model", selectedModel); // 传递选择的AI模型
+
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        alert(data.error || "生成失败，请稍后再试。");
+        setCurrentStep("questions");
+        setLoading(false);
+        return;
+      }
+
+      // 解析能力画像数据（支持从 markdown 代码块中提取 JSON）
+      let profileData: TalentProfileData;
+      const rawStr = String(data.analysis ?? "");
+      let jsonStr = rawStr;
+      try {
+        JSON.parse(rawStr);
+      } catch {
+        const extracted = extractJsonFromText(rawStr);
+        if (extracted) jsonStr = extracted;
+      }
+      try {
+        profileData = JSON.parse(jsonStr) as TalentProfileData;
+        profileData.rankPercent = data.rankPercent;
+        profileData.total = data.total;
+      } catch (e) {
+        console.error("❌ 能力画像 JSON 解析失败:", e, "raw:", rawStr?.slice(0, 200));
+        alert("AI 返回格式异常，无法解析报告。请重试或更换模型。");
+        setCurrentStep("questions");
+        setLoading(false);
+        return;
+      }
+
+      setTalentProfile(profileData);
+      setResumeText(data.resumeText);
+      track("profile_report_generated", {
+        direction: selectedDirection,
+        archetype: profileData.talentTags?.archetype ?? "",
+      });
+
+      // 保存历史
+      appendToHistory({
+        role: targetRole?.trim() || "能力画像",
+        score: profileData.overallMatch ?? 8.0,
+        date: new Date().toISOString(),
+        rankPercent: data.rankPercent,
+        total: data.total,
+      });
+      setHistoryRecords(getHistory());
+
+      setCurrentStep("result");
+    } catch (err) {
+      console.error("❌ 生成出错:", err);
+      alert("生成过程中出现错误，请检查网络或重试。");
+      setCurrentStep("questions");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // 重置能力画像流程
+  function resetProfileFlow() {
+    setCurrentStep("upload");
+    setFile(null);
+    setSelectedDirection("");
+    setTargetRole("");
+    setHasPortfolio("");
+    setPortfolioLink("");
+    setPortfolioFile(null);
+    setQuestionAnswers({});
+    setCurrentQuestionIndex(0);
+    setTalentProfile(null);
+    setResumeText("");
+    setResult("");
+  }
+
   async function handleUpload() {
     if (!file) return alert("请先选择文件！");
     setLoading(true);
@@ -473,6 +954,7 @@ export default function Home() {
       formData.append("file", file);
       formData.append("target_role", targetRole);
       formData.append("jd", jdText);
+      formData.append("mode", "legacy"); // 传统模式
 
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -530,6 +1012,43 @@ export default function Home() {
 
   return (
     <main className="relative min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-gray-950 to-black text-white overflow-hidden">
+      {showFeatureBanner && (
+        <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="w-full max-w-3xl rounded-[28px] border border-slate-500/40 bg-slate-900/95 shadow-[0_0_80px_rgba(168,85,247,0.18)] px-8 py-10">
+            <div className="flex justify-end mb-6">
+              <button
+                type="button"
+                onClick={() => setSelectedFeatureVersion((prev) => prev === "2026-03-14" ? "2026-03-11" : "2026-03-14")}
+                className="rounded-full border border-slate-600/70 bg-slate-800/60 px-4 py-2 text-sm font-semibold text-slate-300 hover:border-slate-500 hover:text-white transition"
+              >
+                {selectedFeatureVersion === "2026-03-14" ? "历史版本" : "返回最新版本"}
+              </button>
+            </div>
+
+            <h2 className="text-center text-4xl font-black text-white tracking-tight mb-5">{activeFeatureBanner.title}</h2>
+            <p className="text-center text-slate-300 text-lg mb-8">
+              {activeFeatureBanner.intro}
+            </p>
+
+            <div className="max-w-2xl mx-auto space-y-4 text-lg text-slate-100 mb-10">
+              {activeFeatureBanner.items.map((item) => (
+                <div key={item} className="flex items-start gap-3">
+                  <span className="mt-2 h-2.5 w-2.5 rounded-full bg-fuchsia-500 shrink-0" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={closeFeatureBanner}
+              className="block w-full max-w-2xl mx-auto rounded-2xl bg-gradient-to-r from-fuchsia-600 to-pink-600 py-5 text-2xl font-bold text-white hover:brightness-110 transition"
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 顶部导航栏：左侧标题+金币 + 右侧菜单 */}
       <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 sm:px-6 py-4 bg-black/40 backdrop-blur-sm border-b border-purple-500/20">
         <div className="flex flex-col gap-2 min-w-0 flex-shrink-0">
@@ -537,6 +1056,9 @@ export default function Home() {
             🐌 SNAIL CAREER｜蜗牛简历
           </h1>
           <ButtonTreasure />
+        </div>
+        <div className="hidden sm:flex items-center">
+          <TodayLoginCount />
         </div>
         <div className="relative" ref={menuRef}>
           <button
@@ -627,10 +1149,13 @@ export default function Home() {
       {mainTab === "analyze" && (
         <>
           <h2 className="text-3xl font-bold mt-2 mb-4 text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-blue-400 text-center">
-            🐌 SNAIL CAREER｜蜗牛简历，一毫米也算前进
+            🐌 AI 求职能力画像
           </h2>
-          <p className="text-center text-white text-lg mb-6">
-            3分钟 快速评估：多久能收到面试邀约
+          <p className="text-center text-white text-lg mb-2">
+            3分钟看清：你最像什么样的人、强项在哪、适合什么岗位
+          </p>
+          <p className="text-center text-slate-400 text-sm mb-6">
+            上传简历 + 回答5个问题，生成可分享的个人能力画像报告
           </p>
         </>
       )}
@@ -1195,80 +1720,451 @@ export default function Home() {
         </div>
       ) : (
         <>
-      {/* 文件上传 */}
-      <div className="relative w-full max-w-md mx-auto mb-6 z-10">
-        <input
-          id="resume-upload"
-          type="file"
-          accept=".pdf,.docx"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
-          className="hidden"
-        />
-        <label
-          htmlFor="resume-upload"
-          className="block cursor-pointer bg-black/70 border border-gray-700 rounded-lg p-3 text-center hover:border-purple-400 transition"
-        >
-          {file ? `📄 ${file.name}` : "点击选择简历文件 (.pdf / .docx)"}
-        </label>
-      </div>
+          {/* ===== 能力画像新流程 ===== */}
+          {currentStep === "upload" && (
+            <div className="w-full max-w-md mx-auto z-10 animate-fade-in">
+              {/* 步骤指示器 */}
+              <div className="flex items-center justify-center gap-2 mb-8">
+                {["上传简历", "选择方向", "补充问答", "生成画像"].map((step, idx) => (
+                  <div key={step} className="flex items-center gap-2">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                      idx === 0 ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-500"
+                    }`}>
+                      {idx + 1}
+                    </div>
+                    {idx < 3 && <div className="w-8 h-0.5 bg-gray-800" />}
+                  </div>
+                ))}
+              </div>
 
-      {/* JD 岗位描述（可选） */}
-      <div className="w-full max-w-md mx-auto mb-4 z-10">
-        <textarea
-          value={jdText}
-          onChange={(e) => setJdText(e.target.value)}
-          placeholder="粘贴岗位描述 JD（可选，便于更精准匹配）"
-          rows={4}
-          className="w-full bg-black/70 border border-gray-700 rounded-lg px-3 py-2.5 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-400/50 resize-y min-h-[80px]"
-        />
-      </div>
+              {/* 文件上传 */}
+              <div className="relative mb-6">
+                <input
+                  id="resume-upload"
+                  type="file"
+                  accept=".pdf,.docx"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      setFile(f);
+                      track("profile_resume_uploaded");
+                    }
+                  }}
+                  className="hidden"
+                />
+                <label
+                  htmlFor="resume-upload"
+                  className="block cursor-pointer bg-black/70 border-2 border-dashed border-gray-600 rounded-xl p-8 text-center hover:border-purple-400 hover:bg-black/80 transition group"
+                >
+                  <div className="text-4xl mb-3">📄</div>
+                  {file ? (
+                    <p className="text-purple-300 font-medium">{file.name}</p>
+                  ) : (
+                    <>
+                      <p className="text-gray-300 font-medium mb-1">点击上传简历</p>
+                      <p className="text-xs text-gray-500">支持 PDF、Word 格式</p>
+                    </>
+                  )}
+                </label>
+              </div>
 
-      {/* 发光输入框 */}
-      <div className="w-full max-w-md mx-auto mb-2">
-        <NeonSearchBar value={targetRole} onChange={setTargetRole} />
-      </div>
+              {/* AI 模型选择 */}
+              <div className="mb-6">
+                <label className="block text-sm text-slate-400 mb-3">选择分析模型</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {AI_MODEL_OPTIONS.map((model) => (
+                    <button
+                      key={model.value}
+                      onClick={() => setSelectedModel(model.value)}
+                      className={`p-3 rounded-xl border-2 text-left transition ${
+                        selectedModel === model.value
+                          ? "border-purple-500 bg-purple-500/20"
+                          : "border-gray-700 bg-black/50 hover:border-gray-600"
+                      }`}
+                    >
+                      <div className={`font-medium text-sm mb-1 ${
+                        selectedModel === model.value ? "text-purple-300" : "text-white"
+                      }`}>
+                        {model.label}
+                      </div>
+                      <div className="text-xs text-slate-400">{model.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-      {/* 上传按钮 */}
-      <div className="w-full max-w-md mx-auto">
-        <button
-          onClick={handleUpload}
-          disabled={loading}
-          className="w-full mt-0 px-12 py-2.5 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 rounded-lg font-semibold hover:brightness-110 disabled:opacity-20"
-        >
-          {loading ? "🐌 蜗牛正在分析中..." : "立即测试！！！"}
-        </button>
-      </div>
+              {/* 下一步按钮 */}
+              <button
+                onClick={() => {
+                  if (!file) {
+                    alert("请先上传简历文件");
+                    return;
+                  }
+                  track("profile_test_started", { model: selectedModel });
+                  setCurrentStep("direction");
+                }}
+                disabled={!file}
+                className="w-full py-3 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white rounded-xl font-semibold hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              >
+                下一步：选择求职方向
+              </button>
 
-      {/* 示例分析报告：在尚未上传时展示 */}
-      {!loading && !result && (
-        <div className="mt-10 max-w-3xl w-full mx-auto">
-          <p className="text-xs text-slate-500 mb-3 text-center">
-            下方为 <span className="text-purple-300">示例分析报告</span>，方便你提前了解效果；上传自己的简历后会替换为真实结果。
-          </p>
-          <AnalysisPanel data={SAMPLE_ANALYSIS_DATA} />
-        </div>
-      )}
+              {/* 示例报告入口 */}
+              <div className="mt-8 text-center">
+                <button
+                  onClick={() => setShowSample(true)}
+                  className="text-sm text-purple-400 hover:text-purple-300 underline underline-offset-2"
+                >
+                  查看示例画像报告
+                </button>
+              </div>
+            </div>
+          )}
 
-      {/* 🐌 分析中状态（Tips 全屏遮罩） */}
-      {loading && <AnalyzingTips seconds={seconds} />}
+          {/* ===== 选择方向 ===== */}
+          {currentStep === "direction" && (
+            <div className="w-full max-w-lg mx-auto z-10 animate-fade-in">
+              {/* 步骤指示器 */}
+              <div className="flex items-center justify-center gap-2 mb-8">
+                {["上传简历", "选择方向", "补充问答", "生成画像"].map((step, idx) => (
+                  <div key={step} className="flex items-center gap-2">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                      idx === 1 ? "bg-purple-600 text-white" : idx < 1 ? "bg-purple-600/50 text-white" : "bg-gray-800 text-gray-500"
+                    }`}>
+                      {idx + 1}
+                    </div>
+                    {idx < 3 && <div className={`w-8 h-0.5 ${idx < 1 ? "bg-purple-600/50" : "bg-gray-800"}`} />}
+                  </div>
+                ))}
+              </div>
 
-      {/* 📄 简历原文 */}
-      {resumeText && !loading && (
-        <div className="bg-black/60 border border-gray-700 rounded-xl p-4 max-w-3xl w-full mt-10 shadow-md">
-          <h2 className="text-lg font-semibold mb-2 text-purple-300 flex items-center gap-1">
-            📄 简历原文
-          </h2>
-          <pre className="whitespace-pre-wrap text-gray-300 text-sm max-h-72 overflow-y-auto">
-            {resumeText}
-          </pre>
-        </div>
-      )}
+              <h3 className="text-xl font-semibold text-white text-center mb-6">
+                你想往哪个方向发展？
+              </h3>
 
-      {/* 📊 分析报告 */}
-      {!loading && result && (
-        <AnalysisPanel data={JSON.parse(result)} />
-      )}
-      <div className="h-60" /> {/* spacer: 底部与版权之间 40px */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
+                {TARGET_DIRECTIONS.map((dir) => (
+                  <button
+                    key={dir.value}
+                    onClick={() => {
+                      setSelectedDirection(dir.value);
+                      setTargetRole(dir.label);
+                    }}
+                    className={`p-4 rounded-xl border-2 text-left transition ${
+                      selectedDirection === dir.value
+                        ? "border-purple-500 bg-purple-500/20"
+                        : "border-gray-700 bg-black/50 hover:border-gray-600"
+                    }`}
+                  >
+                    <div className="text-2xl mb-2">{dir.icon}</div>
+                    <div className={`font-medium ${selectedDirection === dir.value ? "text-purple-300" : "text-gray-300"}`}>
+                      {dir.label}
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* 自定义方向输入 */}
+              <div className="mb-6">
+                <input
+                  type="text"
+                  value={targetRole}
+                  onChange={(e) => setTargetRole(e.target.value)}
+                  placeholder="或者手动输入目标岗位（如：增长产品经理）"
+                  className="w-full bg-black/70 border border-gray-700 rounded-lg px-4 py-3 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none"
+                />
+              </div>
+
+              <div className="mb-6 bg-black/50 border border-gray-700 rounded-xl p-5">
+                <h4 className="text-white font-medium mb-4">是否有作品集展示？</h4>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <button
+                    onClick={() => setHasPortfolio("yes")}
+                    className={`p-4 rounded-xl border-2 text-left transition ${
+                      hasPortfolio === "yes"
+                        ? "border-purple-500 bg-purple-500/20"
+                        : "border-gray-700 bg-black/50 hover:border-gray-600"
+                    }`}
+                  >
+                    <div className={`font-medium ${hasPortfolio === "yes" ? "text-purple-300" : "text-white"}`}>有作品集</div>
+                    <div className="text-sm text-slate-400 mt-1">可以上传文件或填写链接</div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHasPortfolio("no");
+                      setPortfolioLink("");
+                      setPortfolioFile(null);
+                    }}
+                    className={`p-4 rounded-xl border-2 text-left transition ${
+                      hasPortfolio === "no"
+                        ? "border-purple-500 bg-purple-500/20"
+                        : "border-gray-700 bg-black/50 hover:border-gray-600"
+                    }`}
+                  >
+                    <div className={`font-medium ${hasPortfolio === "no" ? "text-purple-300" : "text-white"}`}>暂无作品集</div>
+                    <div className="text-sm text-slate-400 mt-1">按简历与问答继续分析</div>
+                  </button>
+                </div>
+
+                {hasPortfolio === "yes" && (
+                  <div className="space-y-4">
+                    <input
+                      type="url"
+                      value={portfolioLink}
+                      onChange={(e) => setPortfolioLink(e.target.value)}
+                      placeholder="作品集链接，如 Notion / 飞书 / GitHub / 个人网站"
+                      className="w-full bg-black/70 border border-gray-700 rounded-lg px-4 py-3 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none"
+                    />
+                    <div>
+                      <label className="block text-sm text-slate-300 mb-2">或者上传作品集文件</label>
+                      <input
+                        type="file"
+                        accept=".pdf,.docx,.txt,.md"
+                        onChange={(e) => setPortfolioFile(e.target.files?.[0] ?? null)}
+                        className="block w-full text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-purple-500/20 file:px-4 file:py-2 file:text-purple-300 hover:file:bg-purple-500/30"
+                      />
+                      <p className="text-xs text-slate-500 mt-2">支持 PDF、DOCX、TXT、MD。填链接、传文件，二选一即可。</p>
+                      {portfolioFile && <p className="text-xs text-purple-300 mt-2">已选择：{portfolioFile.name}</p>}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setCurrentStep("upload")}
+                  className="flex-1 py-3 bg-black/60 border border-gray-600 text-gray-300 rounded-xl font-medium hover:bg-white/5 transition"
+                >
+                  上一步
+                </button>
+                <button
+                  onClick={() => {
+                    if (!targetRole && !selectedDirection) {
+                      alert("请选择或输入目标方向");
+                      return;
+                    }
+                    if (!hasPortfolio) {
+                      alert("请先选择是否有作品集展示");
+                      return;
+                    }
+                    if (hasPortfolio === "yes" && !portfolioLink.trim() && !portfolioFile) {
+                      alert("请上传作品集文件或填写作品集链接");
+                      return;
+                    }
+                    setCurrentQuestionIndex(0);
+                    setCurrentStep("questions");
+                  }}
+                  disabled={!targetRole && !selectedDirection}
+                  className="flex-1 py-3 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white rounded-xl font-semibold hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  下一步
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ===== 补充问答 ===== */}
+          {currentStep === "questions" && (
+            <div className="w-full max-w-lg mx-auto z-10 animate-fade-in">
+              {/* 步骤指示器 */}
+              <div className="flex items-center justify-center gap-2 mb-8">
+                {["上传简历", "选择方向", "补充问答", "生成画像"].map((step, idx) => (
+                  <div key={step} className="flex items-center gap-2">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                      idx === 2 ? "bg-purple-600 text-white" : idx < 2 ? "bg-purple-600/50 text-white" : "bg-gray-800 text-gray-500"
+                    }`}>
+                      {idx + 1}
+                    </div>
+                    {idx < 3 && <div className={`w-8 h-0.5 ${idx < 2 ? "bg-purple-600/50" : "bg-gray-800"}`} />}
+                  </div>
+                ))}
+              </div>
+
+              {/* 进度条 */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between text-sm text-slate-400 mb-2">
+                  <span>问题 {currentQuestionIndex + 1} / {dynamicQuestions.length}</span>
+                  <span>{Math.round(((currentQuestionIndex + 1) / dynamicQuestions.length) * 100)}%</span>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-2">
+                  <div
+                    className="bg-gradient-to-r from-purple-500 to-blue-500 h-2 rounded-full transition-all"
+                    style={{ width: `${((currentQuestionIndex + 1) / dynamicQuestions.length) * 100}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* 当前问题 */}
+              {currentQuestion && (
+                <div className="bg-black/60 border border-gray-700 rounded-xl p-6 mb-6">
+                  <div className="inline-flex items-center px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs mb-4">
+                    {currentQuestion.stage === "base" ? "基础题" : currentQuestion.stage === "role" ? "岗位题" : "追问题"}
+                  </div>
+                  <h4 className="text-lg font-medium text-white mb-4">
+                    {currentQuestion.question}
+                  </h4>
+
+                  {/* 选择题类型 */}
+                  {currentQuestion.type === "choice" && currentQuestion.options && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {currentQuestion.options.map((option) => (
+                        <button
+                          key={option.value}
+                          onClick={() => setQuestionAnswers(prev => ({
+                            ...prev,
+                            [currentQuestion.id]: option.label
+                          }))}
+                          className={`p-4 rounded-xl border-2 text-left transition ${
+                            questionAnswers[currentQuestion.id] === option.label
+                              ? "border-purple-500 bg-purple-500/20"
+                              : "border-gray-700 bg-black/50 hover:border-gray-600"
+                          }`}
+                        >
+                          <div className={`font-medium mb-1 ${
+                            questionAnswers[currentQuestion.id] === option.label
+                              ? "text-purple-300"
+                              : "text-white"
+                          }`}>
+                            {option.label}
+                          </div>
+                          <div className="text-sm text-slate-400">{option.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 文本输入类型 */}
+                  {currentQuestion.type === "text" && (
+                    <>
+                      <textarea
+                        value={questionAnswers[currentQuestion.id] || ""}
+                        onChange={(e) => setQuestionAnswers(prev => ({
+                          ...prev,
+                          [currentQuestion.id]: e.target.value
+                        }))}
+                        placeholder={currentQuestion.placeholder}
+                        rows={5}
+                        className="w-full bg-black/40 border border-gray-600 rounded-lg px-4 py-3 text-gray-200 placeholder-gray-500 focus:border-purple-400 focus:outline-none resize-y"
+                      />
+                      <p className="text-xs text-slate-500 mt-2">
+                        {currentQuestion.helperText || "提示：用具体事例回答，会让画像更精准。"}
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    if (currentQuestionIndex > 0) {
+                      setCurrentQuestionIndex(prev => prev - 1);
+                    } else {
+                      setCurrentStep("direction");
+                    }
+                  }}
+                  className="flex-1 py-3 bg-black/60 border border-gray-600 text-gray-300 rounded-xl font-medium hover:bg-white/5 transition"
+                >
+                  {currentQuestionIndex > 0 ? "上一题" : "上一步"}
+                </button>
+                <button
+                  onClick={() => {
+                    if (!currentQuestion || !(questionAnswers[currentQuestion.id] || "").trim()) {
+                      alert("请先完成当前问题");
+                      return;
+                    }
+                    if (currentQuestionIndex < dynamicQuestions.length - 1) {
+                      setCurrentQuestionIndex(prev => prev + 1);
+                    } else {
+                      // 最后一题，提交生成
+                      track("profile_questions_completed");
+                      handleProfileGenerate();
+                    }
+                  }}
+                  className="flex-1 py-3 bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-white rounded-xl font-semibold hover:brightness-110 transition"
+                >
+                  {currentQuestionIndex < dynamicQuestions.length - 1 ? "下一题" : "生成能力画像"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ===== 分析中 ===== */}
+          {currentStep === "analyzing" && <AnalyzingTips seconds={seconds} />}
+
+          {/* ===== 结果展示 ===== */}
+          {currentStep === "result" && talentProfile && (
+            <div className="w-full animate-fade-in">
+              <TalentProfilePanel
+                data={talentProfile}
+                onSave={() => {
+                  // 保存到历史记录
+                  appendToHistory({
+                    role: targetRole?.trim() || "能力画像",
+                    score: talentProfile.overallMatch ?? 8.0,
+                    date: new Date().toISOString(),
+                    rankPercent: talentProfile.rankPercent,
+                    total: talentProfile.total,
+                  });
+                  setHistoryRecords(getHistory());
+                  alert("已保存到历史记录");
+                }}
+                onShare={() => {
+                  console.log("分享画像");
+                }}
+              />
+
+              {/* 再来一次按钮 */}
+              <div className="text-center mt-8">
+                <button
+                  onClick={resetProfileFlow}
+                  className="px-6 py-3 bg-black/60 border border-gray-600 text-gray-300 rounded-xl font-medium hover:bg-white/5 transition"
+                >
+                  再测一次（换方向）
+                </button>
+              </div>
+
+              <div className="h-40" />
+            </div>
+          )}
+
+          {/* ===== 示例报告预览 ===== */}
+          {showSample && (
+            <div className="fixed inset-0 z-50 bg-black/90 overflow-y-auto">
+              <div className="max-w-4xl mx-auto p-4">
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-xl font-semibold text-white">示例能力画像报告</h3>
+                  <button
+                    onClick={() => setShowSample(false)}
+                    className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700"
+                  >
+                    关闭预览
+                  </button>
+                </div>
+                <TalentProfilePanel data={SAMPLE_TALENT_PROFILE} />
+              </div>
+            </div>
+          )}
+
+          {/* 🐌 分析中状态（Tips 全屏遮罩） */}
+          {loading && currentStep !== "analyzing" && <AnalyzingTips seconds={seconds} />}
+
+          {/* 📄 简历原文 */}
+          {resumeText && !loading && currentStep !== "result" && (
+            <div className="bg-black/60 border border-gray-700 rounded-xl p-4 max-w-3xl w-full mt-10 shadow-md">
+              <h2 className="text-lg font-semibold mb-2 text-purple-300 flex items-center gap-1">
+                📄 简历原文
+              </h2>
+              <pre className="whitespace-pre-wrap text-gray-300 text-sm max-h-72 overflow-y-auto">
+                {resumeText}
+              </pre>
+            </div>
+          )}
+
+          {/* 📊 旧版分析报告 */}
+          {!loading && result && currentStep !== "result" && (
+            <AnalysisPanel data={JSON.parse(result)} />
+          )}
         </>
       )}
 
