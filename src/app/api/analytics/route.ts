@@ -22,6 +22,8 @@ const ALLOWED_EVENTS: AnalyticsEvent[] = [
   "mock_interview_deck_created",
   "mock_interview_card_flip",
   "agenda_task_created",
+  "agenda_json_exported",
+  "agenda_json_imported",
   // 能力画像漏斗事件
   "profile_test_started",
   "profile_resume_uploaded",
