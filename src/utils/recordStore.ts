@@ -25,8 +25,7 @@ export async function addRecord(role: string, score: number) {
   }
 
   console.log("🧾 [LOG] Writing to Supabase:", role, score);
-  const { data, error } = await supabase
-    .from("records")
+  const { data, error } = await (supabase.from("records") as any)
     .insert([{ role, score }]);
 
   if (error) {
@@ -44,8 +43,7 @@ export async function calculateRank(score: number) {
     return { rankPercent: 50, total: 1 }; // 返回默认值，避免前端报错
   }
 
-  const { data, error } = await supabase
-    .from("records")
+  const { data, error } = await (supabase.from("records") as any)
     .select("score");
 
   if (error || !data) {
@@ -54,7 +52,7 @@ export async function calculateRank(score: number) {
   }
 
   const total = data.length;
-  const better = data.filter((r) => r.score > score).length;
+  const better = data.filter((r: any) => r.score > score).length;
   const rankPercent = total > 0 ? ((total - better) / total) * 100 : 0;
 
   console.log(`📊 [Rank] total=${total}, rank=${rankPercent.toFixed(1)}%`);

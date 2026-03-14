@@ -447,7 +447,7 @@ ${text}
       const rawJson = mode === "talent_profile" ? extractJsonFromText(result) || result : result;
       const parsed = JSON.parse(rawJson);
       score = mode === "talent_profile"
-        ? (parsed.overallMatch ?? (parsed.hexagonScores?.jobMatch ? parsed.hexagonScores.jobMatch * 2 : 0) ?? parsed.legacyScores?.overallMatch ?? 0)
+        ? (parsed.overallMatch ?? (parsed.hexagonScores?.jobMatch ? parsed.hexagonScores.jobMatch * 2 : undefined) ?? parsed.legacyScores?.overallMatch ?? 0)
         : (parsed.综合匹配度 ?? 0);
     } catch (e) {
       console.error("⚠️ [Step 12] JSON 解析失败，AI 输出非标准格式:", e);

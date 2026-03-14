@@ -364,8 +364,36 @@ function DetailView({
           </button>
         </div>
       </div>
-      {/* 面试前清单：一项一项勾选，勾选后自动保存 */}
-      <div className="mb-4 p-3 rounded-xl bg-white/5 border border-white/10">
+      {editing ? (
+        <>
+          <label className="block text-sm font-medium text-slate-300 mb-1">标题</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white outline-none focus:ring-2 focus:ring-purple-500/50 mb-4"
+          />
+          <label className="block text-sm font-medium text-slate-300 mb-1">内容</label>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={12}
+            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white outline-none focus:ring-2 focus:ring-purple-500/50 resize-y mb-4"
+          />
+        </>
+      ) : (
+        <>
+          <h2 className="text-lg font-bold text-white mb-2">{entry.title || "未命名"}</h2>
+          <p className="text-xs text-slate-400 mb-3">
+            {new Date(entry.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}
+          </p>
+          <div className="text-slate-200 whitespace-pre-wrap text-sm rounded-lg bg-white/5 p-3 border border-white/10 min-h-[200px] mb-4">
+            {entry.content || "（无内容）"}
+          </div>
+        </>
+      )}
+      {/* 面试前清单：在标题和内容下方，一项一项勾选，勾选后自动保存 */}
+      <div className="p-3 rounded-xl bg-white/5 border border-white/10">
         <p className="text-xs font-medium text-slate-400 mb-2">面试前清单</p>
         <ul className="space-y-2">
           {checklist.map((item, i) => (
@@ -383,34 +411,6 @@ function DetailView({
           ))}
         </ul>
       </div>
-      {editing ? (
-        <>
-          <label className="block text-sm font-medium text-slate-300 mb-1">标题</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white outline-none focus:ring-2 focus:ring-purple-500/50 mb-4"
-          />
-          <label className="block text-sm font-medium text-slate-300 mb-1">内容</label>
-          <textarea
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={12}
-            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/15 text-white outline-none focus:ring-2 focus:ring-purple-500/50 resize-y"
-          />
-        </>
-      ) : (
-        <>
-          <h2 className="text-lg font-bold text-white mb-2">{entry.title || "未命名"}</h2>
-          <p className="text-xs text-slate-400 mb-3">
-            {new Date(entry.createdAt).toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric" })}
-          </p>
-          <div className="text-slate-200 whitespace-pre-wrap text-sm rounded-lg bg-white/5 p-3 border border-white/10 min-h-[200px]">
-            {entry.content || "（无内容）"}
-          </div>
-        </>
-      )}
     </div>
   );
 }
