@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import PromoVideo from "../components/PromoVideo";
-import { ArrowLeft, Sparkles, Smartphone, Monitor, Play, Download, Share2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Smartphone, Monitor, Play, Download, Share2, X, MonitorPlay, Camera } from "lucide-react";
 import Link from "next/link";
 
 export default function PromoPage() {
   const [isVertical, setIsVertical] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showDownloadGuide, setShowDownloadGuide] = useState(false);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900">
@@ -135,6 +136,7 @@ export default function PromoPage() {
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 text-sm transition-all"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
+              onClick={() => setShowDownloadGuide(true)}
             >
               <Download className="w-4 h-4" />
               <span>下载视频</span>
@@ -251,6 +253,120 @@ export default function PromoPage() {
 
       {/* 底部装饰 */}
       <div className="fixed bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-purple-900/20 to-transparent pointer-events-none" />
+
+      {/* 下载视频指引弹窗 */}
+      <AnimatePresence>
+        {showDownloadGuide && (
+          <motion.div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowDownloadGuide(false)}
+          >
+            <motion.div
+              className="relative w-full max-w-md p-6 rounded-2xl bg-slate-800 border border-purple-500/30 shadow-2xl"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* 关闭按钮 */}
+              <button
+                onClick={() => setShowDownloadGuide(false)}
+                className="absolute top-4 right-4 p-2 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+
+              {/* 标题 */}
+              <div className="text-center mb-6">
+                <motion.div
+                  className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center"
+                  animate={{ rotate: [0, 5, -5, 0] }}
+                  transition={{ duration: 4, repeat: Infinity }}
+                >
+                  <MonitorPlay className="w-8 h-8 text-white" />
+                </motion.div>
+                <h2 className="text-xl font-bold text-white mb-2">如何下载视频</h2>
+                <p className="text-sm text-gray-400">
+                  宣传片为实时渲染动画，可通过录屏方式保存
+                </p>
+              </div>
+
+              {/* 录屏方法 */}
+              <div className="space-y-3 mb-6">
+                {[
+                  {
+                    icon: Camera,
+                    title: "Windows 用户",
+                    desc: "使用 Xbox Game Bar（Win+G）或 OBS 录屏",
+                    color: "blue",
+                  },
+                  {
+                    icon: Camera,
+                    title: "Mac 用户",
+                    desc: "使用 QuickTime Player 或 cmd+shift+5 录屏",
+                    color: "purple",
+                  },
+                  {
+                    icon: MonitorPlay,
+                    title: "专业工具",
+                    desc: "OBS Studio、Bandicam、ScreenFlow 等",
+                    color: "pink",
+                  },
+                ].map((item, index) => (
+                  <motion.div
+                    key={item.title}
+                    className="flex items-start gap-3 p-3 rounded-xl bg-white/5 border border-purple-500/20"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 + index * 0.1 }}
+                  >
+                    <div className={`w-10 h-10 rounded-lg bg-${item.color}-500/20 flex items-center justify-center flex-shrink-0`}>
+                      <item.icon className={`w-5 h-5 text-${item.color}-400`} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-white">{item.title}</h3>
+                      <p className="text-xs text-gray-400">{item.desc}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+
+              {/* 提示 */}
+              <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 mb-5">
+                <p className="text-xs text-yellow-300 text-center">
+                  💡 提示：点击"全屏播放"后录屏效果最佳
+                </p>
+              </div>
+
+              {/* 按钮 */}
+              <div className="flex gap-3">
+                <motion.button
+                  className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-300 text-sm font-medium transition-colors"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setShowDownloadGuide(false)}
+                >
+                  我知道了
+                </motion.button>
+                <motion.button
+                  className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 hover:opacity-90 text-white text-sm font-medium transition-all"
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    setShowDownloadGuide(false);
+                    setIsFullscreen(true);
+                  }}
+                >
+                  进入全屏
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
