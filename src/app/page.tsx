@@ -1104,10 +1104,23 @@ export default function Home() {
                 </a>
                 <a
                   href="/snail-island"
-                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition rounded-b-xl"
+                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition"
                   onClick={() => setMenuOpen(false)}
                 >
                   蜗牛岛
+                </a>
+                <a
+                  href="/promo"
+                  className="block px-4 py-3 text-sm font-medium text-purple-300 bg-gradient-to-r from-purple-500/20 to-pink-500/20 hover:from-purple-500/30 hover:to-pink-500/30 hover:text-purple-200 transition rounded-b-xl border-t border-purple-500/20"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  <span className="flex items-center gap-2">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    宣传片
+                  </span>
                 </a>
             </div>
           )}
