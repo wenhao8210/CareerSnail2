@@ -182,7 +182,6 @@ const INITIAL_TASKS: TaskItem[] = [
 
 const AGENDA_TASKS_KEY = "snail_career_agenda_tasks";
 const AGENDA_DATE_REMINDERS_KEY = "snail_career_agenda_date_reminders";
-const AGENDA_ANALYSIS_PASSED_KEY = "snail_career_agenda_analysis_passed";
 
 /** 写任务时可选的预设标签 */
 const PRESET_TAGS = ["学习", "生活", "面试"] as const;
@@ -376,11 +375,6 @@ export default function AgendaPage(): React.ReactNode {
   const [menuOpen, setMenuOpen] = useState(false);
   const [tasksFilter, setTasksFilter] = useState<"home" | "active" | "done" | "overview">("overview");
   const [tasks, setTasks] = useState<TaskItem[]>(INITIAL_TASKS);
-  const [analysisPassedTaskIds, setAnalysisPassedTaskIds] = useState<number[]>([]);
-  const [analysisPendingExpanded, setAnalysisPendingExpanded] = useState(false);
-  const [analysisPassedExpanded, setAnalysisPassedExpanded] = useState(true);
-  const [analysisDragTaskId, setAnalysisDragTaskId] = useState<number | null>(null);
-  const [analysisDropBucket, setAnalysisDropBucket] = useState<"pending" | "passed" | null>(null);
   const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
   /** 详情弹窗内编辑中的副本，有改动时显示「更新」按钮 */
   const [detailEdit, setDetailEdit] = useState<{ text: string; date: string; time: string; note: string; color: string; remarks: string } | null>(null);
@@ -563,13 +557,6 @@ export default function AgendaPage(): React.ReactNode {
   };
 
   const filteredTasks = tasksFilter === "active" ? tasks.filter((t) => !t.completed) : tasksFilter === "done" ? tasks.filter((t) => t.completed) : [];
-  const analysisInterviewTasks = tasks.filter((t) => getTagsFromNote(t.note).includes("面试"));
-  const analysisPassedTaskIdSet = new Set(analysisPassedTaskIds);
-  const analysisPendingTasks = analysisInterviewTasks.filter((t) => !analysisPassedTaskIdSet.has(t.id));
-  const analysisPassedTasks = analysisInterviewTasks.filter((t) => analysisPassedTaskIdSet.has(t.id));
-  const analysisConversionRate = analysisInterviewTasks.length > 0
-    ? (analysisPassedTasks.length / analysisInterviewTasks.length) * 100
-    : 0;
   const todayKey = toDateKey(new Date());
   const todayTasks = tasks.filter((t) => !t.completed && t.date === todayKey);
   const upcomingTasks = (() => {
@@ -606,7 +593,6 @@ export default function AgendaPage(): React.ReactNode {
       diaryEntries,
       todayMemo,
       pinnedUpcomingIds,
-      analysisPassedTaskIds,
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -643,9 +629,8 @@ export default function AgendaPage(): React.ReactNode {
         : null;
       const nextTodayMemo = typeof parsed.todayMemo === "string" ? parsed.todayMemo : null;
       const nextPinnedUpcomingIds = Array.isArray(parsed.pinnedUpcomingIds) ? parsed.pinnedUpcomingIds.map((x) => Number(x)).filter((x) => Number.isFinite(x)) : null;
-      const nextAnalysisPassedTaskIds = Array.isArray(parsed.analysisPassedTaskIds) ? parsed.analysisPassedTaskIds.map((x) => Number(x)).filter((x) => Number.isFinite(x)) : null;
 
-      if (!nextTasks || !nextDateReminders || !nextEverydayTasks || !nextDiaryEntries || nextTodayMemo == null || !nextPinnedUpcomingIds || !nextAnalysisPassedTaskIds) {
+      if (!nextTasks || !nextDateReminders || !nextEverydayTasks || !nextDiaryEntries || nextTodayMemo == null || !nextPinnedUpcomingIds) {
         alert("JSON 格式不正确，无法导入。");
         return;
       }
@@ -656,7 +641,6 @@ export default function AgendaPage(): React.ReactNode {
       setDiaryEntries(nextDiaryEntries);
       setTodayMemo(nextTodayMemo);
       setPinnedUpcomingIds(nextPinnedUpcomingIds);
-      setAnalysisPassedTaskIds(nextAnalysisPassedTaskIds);
       track("agenda_json_imported");
       alert("小蜗日程 JSON 导入成功。");
     } catch (error) {
@@ -787,35 +771,6 @@ export default function AgendaPage(): React.ReactNode {
     if (fromIdx !== -1 && toIdx !== -1) reorderTasks(fromIdx, toIdx);
     setDragTaskId(null);
     setDragOverTaskId(null);
-  };
-
-  const moveAnalysisTaskToBucket = (taskId: number, bucket: "pending" | "passed") => {
-    setAnalysisPassedTaskIds((prev) => {
-      if (bucket === "passed") return prev.includes(taskId) ? prev : [...prev, taskId];
-      return prev.filter((id) => id !== taskId);
-    });
-  };
-  const handleAnalysisDragStart = (e: React.DragEvent, taskId: number) => {
-    e.stopPropagation();
-    setAnalysisDragTaskId(taskId);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", String(taskId));
-  };
-  const handleAnalysisBucketDragOver = (e: React.DragEvent, bucket: "pending" | "passed") => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setAnalysisDropBucket(bucket);
-  };
-  const handleAnalysisBucketDragLeave = () => setAnalysisDropBucket(null);
-  const handleAnalysisBucketDrop = (e: React.DragEvent, bucket: "pending" | "passed") => {
-    e.preventDefault();
-    if (analysisDragTaskId != null) moveAnalysisTaskToBucket(analysisDragTaskId, bucket);
-    setAnalysisDragTaskId(null);
-    setAnalysisDropBucket(null);
-  };
-  const handleAnalysisDragEnd = () => {
-    setAnalysisDragTaskId(null);
-    setAnalysisDropBucket(null);
   };
 
   /** Overview：拖拽任务到日期列时更新任务日期 */
@@ -1024,13 +979,6 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
   useEffect(() => {
     if (typeof window === "undefined" || !hasHydratedFromStorageRef.current) return;
     try {
-      localStorage.setItem(AGENDA_ANALYSIS_PASSED_KEY, JSON.stringify(analysisPassedTaskIds));
-    } catch {}
-  }, [analysisPassedTaskIds]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !hasHydratedFromStorageRef.current) return;
-    try {
       localStorage.setItem(AGENDA_DATE_REMINDERS_KEY, JSON.stringify(dateReminders));
     } catch {}
   }, [dateReminders]);
@@ -1072,15 +1020,6 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
             }
           } catch {}
         }
-        const analysisRaw = localStorage.getItem(AGENDA_ANALYSIS_PASSED_KEY);
-        if (analysisRaw) {
-          try {
-            const ids = JSON.parse(analysisRaw);
-            if (Array.isArray(ids)) {
-              setAnalysisPassedTaskIds(ids.map((x) => Number(x)).filter((x) => Number.isFinite(x)));
-            }
-          } catch {}
-        }
         diaryLoadedRef.current = true;
       } catch {}
       todayMemoLoadedRef.current = true;
@@ -1089,14 +1028,6 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
     hasHydratedFromStorageRef.current = true;
     everydayHydratedRef.current = true;
   }, []);
-
-  useEffect(() => {
-    const validIds = new Set(analysisInterviewTasks.map((t) => t.id));
-    setAnalysisPassedTaskIds((prev) => {
-      const next = prev.filter((id) => validIds.has(id));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [analysisInterviewTasks]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !todayMemoLoadedRef.current) return;
@@ -1364,189 +1295,9 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
           </div>
         ) : (
           /* 任务列表（左）+ 每日任务（右）：左右等分、顶格、中间留空 */
-          <div className={`w-full py-4 flex ${tasksFilter === "active" ? "flex-row gap-8 pl-4 pr-4" : tasksFilter === "analysis" ? "px-4" : "max-w-lg mx-auto px-4"}`}>
+          <div className={`w-full py-4 flex ${tasksFilter === "active" ? "flex-row gap-8 pl-4 pr-4" : "max-w-lg mx-auto px-4"}`}>
             {/* 左侧：常规 tasks，顶格靠左 */}
             <div className={tasksFilter === "active" ? "flex-1 min-w-0 flex flex-col items-stretch w-full" : "w-full"}>
-            {tasksFilter === "analysis" ? (
-              <div className="w-full grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px_minmax(0,1fr)] gap-4 items-start">
-                <div
-                  className={`rounded-2xl border transition ${analysisDropBucket === "pending" ? "border-cyan-400 shadow-[0_0_0_1px_rgba(34,211,238,0.5)]" : "border-white/10"}`}
-                  style={{ backgroundColor: BG_DARK }}
-                  onDragOver={(e) => handleAnalysisBucketDragOver(e, "pending")}
-                  onDragLeave={handleAnalysisBucketDragLeave}
-                  onDrop={(e) => handleAnalysisBucketDrop(e, "pending")}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setAnalysisPendingExpanded((v) => !v)}
-                    className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left"
-                  >
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.18em] text-cyan-300">Interviewing</p>
-                      <h3 className="text-lg font-semibold text-white mt-1">待面试</h3>
-                      <p className="text-sm text-slate-400 mt-1">共 {analysisPendingTasks.length} 个面试机会</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-2xl font-black text-white tabular-nums">{analysisPendingTasks.length}</div>
-                      <div className="text-xs text-slate-500 mt-1">{analysisPendingExpanded ? "点击折叠" : "点击展开"}</div>
-                    </div>
-                  </button>
-                  <motion.div
-                    initial={false}
-                    animate={{ height: analysisPendingExpanded ? "auto" : 0, opacity: analysisPendingExpanded ? 1 : 0 }}
-                    transition={{ duration: 0.28, ease: "easeInOut" }}
-                    className="overflow-hidden"
-                  >
-                    <div className="px-4 pb-4 space-y-3">
-                      {analysisPendingTasks.length > 0 ? analysisPendingTasks.map((task) => (
-                        <motion.div
-                          key={task.id}
-                          layout
-                          transition={{ type: "spring", stiffness: 320, damping: 28 }}
-                          className={`rounded-2xl border border-emerald-400/30 bg-[#2D8A3E] text-white p-4 cursor-pointer ${analysisDragTaskId === task.id ? "opacity-60" : ""}`}
-                          onClick={() => setDetailTaskId(task.id)}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <span className="text-[10px] font-black px-2 py-1 rounded-full bg-black/20 uppercase tracking-wide">待面试</span>
-                            <span
-                              draggable
-                              onDragStart={(e) => handleAnalysisDragStart(e, task.id)}
-                              onDragEnd={handleAnalysisDragEnd}
-                              onClick={(e) => e.stopPropagation()}
-                              className="cursor-grab active:cursor-grabbing shrink-0 p-1 -m-1 rounded opacity-70 hover:opacity-100"
-                              aria-label="拖动到已通过"
-                            >
-                              <GripVertical size={18} className="text-white" strokeWidth={2} />
-                            </span>
-                          </div>
-                          <h3 className="text-base font-black leading-tight tracking-tight mt-2">{task.text}</h3>
-                          {(task.date || task.time) && (
-                            <p className="text-xs font-medium opacity-90 mt-1 tabular-nums">
-                              📅 {[task.date ? formatDateDisplay(task.date) : null, task.time].filter(Boolean).join(" ")}
-                            </p>
-                          )}
-                          {getTagsFromNote(task.note).length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {getTagsFromNote(task.note).map((tag) => (
-                                <span key={tag} className="text-[10px] font-black px-2 py-0.5 rounded-full uppercase truncate max-w-[5rem] bg-white/15">
-                                  #{tag}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {task.remarks?.trim() && (
-                            <p className="text-xs opacity-90 mt-1.5 line-clamp-2 break-words">
-                              {task.remarks.trim()}
-                            </p>
-                          )}
-                        </motion.div>
-                      )) : (
-                        <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 px-4 py-8 text-center text-sm text-slate-500">
-                          这里暂时没有待面试的任务
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 px-5 py-6 text-center" style={{ backgroundColor: BG_DARK }}>
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-purple-300">Conversion</p>
-                  <div className="mt-4 text-4xl font-black text-white tabular-nums">{analysisConversionRate.toFixed(0)}%</div>
-                  <p className="mt-2 text-sm text-slate-400">通过率</p>
-                  <div className="mt-6 space-y-3 text-sm">
-                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
-                      <div className="text-slate-500">总面试</div>
-                      <div className="text-xl font-bold text-white tabular-nums">{analysisInterviewTasks.length}</div>
-                    </div>
-                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-3">
-                      <div className="text-emerald-200/80">已通过</div>
-                      <div className="text-xl font-bold text-emerald-300 tabular-nums">{analysisPassedTasks.length}</div>
-                    </div>
-                  </div>
-                  <p className="mt-4 text-xs leading-5 text-slate-500">把左边的面试卡片拖到右边，系统会自动统计通过数量和转化率。</p>
-                </div>
-
-                <div
-                  className={`rounded-2xl border transition ${analysisDropBucket === "passed" ? "border-emerald-400 shadow-[0_0_0_1px_rgba(74,222,128,0.45)]" : "border-white/10"}`}
-                  style={{ backgroundColor: BG_DARK }}
-                  onDragOver={(e) => handleAnalysisBucketDragOver(e, "passed")}
-                  onDragLeave={handleAnalysisBucketDragLeave}
-                  onDrop={(e) => handleAnalysisBucketDrop(e, "passed")}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setAnalysisPassedExpanded((v) => !v)}
-                    className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left"
-                  >
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-300">Passed</p>
-                      <h3 className="text-lg font-semibold text-white mt-1">已通过</h3>
-                      <p className="text-sm text-slate-400 mt-1">共 {analysisPassedTasks.length} 个通过结果</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-2xl font-black text-white tabular-nums">{analysisPassedTasks.length}</div>
-                      <div className="text-xs text-slate-500 mt-1">{analysisPassedExpanded ? "点击折叠" : "点击展开"}</div>
-                    </div>
-                  </button>
-                  <motion.div
-                    initial={false}
-                    animate={{ height: analysisPassedExpanded ? "auto" : 0, opacity: analysisPassedExpanded ? 1 : 0 }}
-                    transition={{ duration: 0.28, ease: "easeInOut" }}
-                    className="overflow-hidden"
-                  >
-                    <div className="px-4 pb-4 space-y-3">
-                      {analysisPassedTasks.length > 0 ? analysisPassedTasks.map((task) => (
-                        <motion.div
-                          key={task.id}
-                          layout
-                          transition={{ type: "spring", stiffness: 320, damping: 28 }}
-                          className={`rounded-2xl border border-emerald-300/40 bg-[#2D8A3E] text-white p-4 cursor-pointer ${analysisDragTaskId === task.id ? "opacity-60" : ""}`}
-                          onClick={() => setDetailTaskId(task.id)}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <span className="text-[10px] font-black px-2 py-1 rounded-full bg-white/15 uppercase tracking-wide">已通过</span>
-                            <span
-                              draggable
-                              onDragStart={(e) => handleAnalysisDragStart(e, task.id)}
-                              onDragEnd={handleAnalysisDragEnd}
-                              onClick={(e) => e.stopPropagation()}
-                              className="cursor-grab active:cursor-grabbing shrink-0 p-1 -m-1 rounded opacity-70 hover:opacity-100"
-                              aria-label="拖动回待面试"
-                            >
-                              <GripVertical size={18} className="text-white" strokeWidth={2} />
-                            </span>
-                          </div>
-                          <h3 className="text-base font-black leading-tight tracking-tight mt-2">{task.text}</h3>
-                          {(task.date || task.time) && (
-                            <p className="text-xs font-medium opacity-90 mt-1 tabular-nums">
-                              📅 {[task.date ? formatDateDisplay(task.date) : null, task.time].filter(Boolean).join(" ")}
-                            </p>
-                          )}
-                          {getTagsFromNote(task.note).length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                              {getTagsFromNote(task.note).map((tag) => (
-                                <span key={tag} className="text-[10px] font-black px-2 py-0.5 rounded-full uppercase truncate max-w-[5rem] bg-white/15">
-                                  #{tag}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {task.remarks?.trim() && (
-                            <p className="text-xs opacity-90 mt-1.5 line-clamp-2 break-words">
-                              {task.remarks.trim()}
-                            </p>
-                          )}
-                        </motion.div>
-                      )) : (
-                        <div className="rounded-2xl border border-dashed border-white/10 bg-black/20 px-4 py-8 text-center text-sm text-slate-500">
-                          通过的面试拖到这里
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                </div>
-              </div>
-            ) : (
             <div className="w-full p-4 space-y-3 rounded-b-2xl border border-t-0 border-white/10" style={{ backgroundColor: BG_DARK }}>
               {filteredTasks.map((task) => (
                 <motion.div
@@ -1634,7 +1385,6 @@ ${remarks || "（用户未填写，请根据 deadline 与 span 拆成 3 个通�
                 </motion.div>
               ))}
             </div>
-            )}
             {tasksFilter === "active" && (
               <div className="w-full p-4 border border-t-0 border-white/10 rounded-b-2xl pb-8" style={{ backgroundColor: BG_DARK }}>
                 <div className="w-full rounded-full flex items-center h-12 overflow-hidden border border-white/15" style={{ backgroundColor: "rgba(0,0,0,0.3)" }}>
