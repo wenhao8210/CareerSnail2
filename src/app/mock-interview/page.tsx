@@ -35,6 +35,14 @@ const STORAGE_KEYS = {
   mistakes: "ai_flashcards_mistakes",
   totalLikes: "ai_flashcards_total_likes",
   tutorialDone: "snail_mock_interview_tutorial_done",
+  autoCreateDraft: "snail_mock_interview_auto_create",
+};
+
+type AutoCreateDraft = {
+  projectName: string;
+  jdContent: string;
+  resumeContent: string;
+  autoGenerate?: boolean;
 };
 
 const TUTORIAL_STEPS: { title: string; body: string }[] = [
@@ -205,6 +213,7 @@ export default function MockInterviewPage() {
   const tutorialTipRef = useRef<HTMLDivElement>(null);
   const [syncLoading, setSyncLoading] = useState<"up" | "down" | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
   const { user } = useUser();
   const storage = safeLocalStorage();
 
@@ -283,6 +292,7 @@ export default function MockInterviewPage() {
     if (sm) try { setMistakes(JSON.parse(sm)); } catch {}
     const tl = storage.getItem(STORAGE_KEYS.totalLikes);
     if (tl) setTotalLikeCount(parseInt(tl, 10) || 0);
+    setStorageReady(true);
   }, []);
 
   useEffect(() => {
@@ -414,8 +424,8 @@ export default function MockInterviewPage() {
     return p?.name ?? projects[0]?.name ?? defaultProject.name;
   };
 
-  const handleCreateProject = async () => {
-    if (!projectName.trim() || !jdContent.trim() || !resumeContent.trim()) {
+  const createProjectWithInputs = async (draft: AutoCreateDraft) => {
+    if (!draft.projectName.trim() || !draft.jdContent.trim() || !draft.resumeContent.trim()) {
       alert("请填写完整信息：项目名称、JD 和简历内容");
       return;
     }
@@ -435,7 +445,7 @@ export default function MockInterviewPage() {
     }, 500);
 
     try {
-      const questions = await generateQuestionsWithAI(resumeContent, jdContent);
+      const questions = await generateQuestionsWithAI(draft.resumeContent, draft.jdContent);
       const mapped: QuestionItem[] = questions.map((q, idx) => ({
         id: `q_${Date.now()}_${idx}`,
         category: q.category || "通用",
@@ -444,9 +454,9 @@ export default function MockInterviewPage() {
       }));
       const newProject: Project = {
         id: `project_${Date.now()}`,
-        name: projectName,
-        jd: jdContent,
-        resume: resumeContent,
+        name: draft.projectName,
+        jd: draft.jdContent,
+        resume: draft.resumeContent,
         questions: mapped,
         createdAt: new Date().toISOString(),
       };
@@ -476,6 +486,43 @@ export default function MockInterviewPage() {
       clearInterval(progressInterval);
     }
   };
+
+  const handleCreateProject = async () => {
+    await createProjectWithInputs({
+      projectName,
+      jdContent,
+      resumeContent,
+    });
+  };
+
+  useEffect(() => {
+    if (!storageReady) return;
+
+    const raw = storage.getItem(STORAGE_KEYS.autoCreateDraft);
+    if (!raw) return;
+
+    let draft: AutoCreateDraft | null = null;
+    try {
+      draft = JSON.parse(raw) as AutoCreateDraft;
+    } catch {
+      draft = null;
+    }
+
+    storage.setItem(STORAGE_KEYS.autoCreateDraft, "");
+
+    if (!draft?.projectName || !draft.jdContent || !draft.resumeContent) {
+      return;
+    }
+
+    setProjectName(draft.projectName);
+    setJdContent(draft.jdContent);
+    setResumeContent(draft.resumeContent);
+    setView("create");
+
+    if (draft.autoGenerate) {
+      void createProjectWithInputs(draft);
+    }
+  }, [storageReady]);
 
   const handleDeleteProject = (projectId: string) => {
     if (!confirm("确定要删除这个项目吗？")) return;
@@ -752,13 +799,6 @@ export default function MockInterviewPage() {
                   onClick={() => setMenuOpen(false)}
                 >
                   面试复盘
-                </a>
-                <a
-                  href="/snail-island"
-                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition"
-                  onClick={() => setMenuOpen(false)}
-                >
-                  蜗牛岛
                 </a>
                 <a
                   href="/promo"

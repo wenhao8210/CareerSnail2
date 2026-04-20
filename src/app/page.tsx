@@ -13,6 +13,7 @@ import { track } from "@/lib/analytics";
 
 const CLIPBOARD_STORAGE_KEY = "snail_career_clipboard";
 const FEATURE_BANNER_STORAGE_KEY = "snail_feature_banner_seen_2026_03_14";
+const MOCK_INTERVIEW_AUTO_CREATE_KEY = "snail_mock_interview_auto_create";
 
 const FEATURE_BANNER_VERSIONS = [
   {
@@ -397,206 +398,61 @@ type QuestionItem = {
   shouldShow?: (ctx: QuestionFlowContext) => boolean;
 };
 
-// 团队角色选项
-const TEAM_ROLE_OPTIONS: QuestionOption[] = [
-  { value: "leader", label: "统筹者", desc: "擅长定目标、分工、把控进度" },
-  { value: "executor", label: "执行者", desc: "擅长把想法落地、追求效率" },
-  { value: "creative", label: "创意者", desc: "擅长出点子、设计体验、发现问题" },
-  { value: "coordinator", label: "协调者", desc: "擅长沟通、润滑关系、处理冲突" },
-  { value: "analyst", label: "分析者", desc: "擅长数据、逻辑、深度思考" },
-  { value: "supporter", label: "支持者", desc: "擅长补位、兜底、默默推进" },
+const VIBE_CODING_OPTIONS: QuestionOption[] = [
+  { value: "often", label: "经常", desc: "平时会用它做小功能或快速验证想法" },
+  { value: "sometimes", label: "偶尔", desc: "试过几次，能辅助自己完成一些东西" },
+  { value: "never", label: "还没试过", desc: "暂时没有系统用过，想先看看别人怎么做" },
 ];
 
-// AI 模型选项
-const AI_MODEL_OPTIONS = [
-  {
-    value: "gpt-5",
-    label: "OpenAI GPT-5",
-    desc: "OpenAI 最新模型，综合能力最强",
-    provider: "openai",
-  },
-  {
-    value: "Qwen/Qwen3-235B-A22B-Instruct-2507",
-    label: "通义千问 3 (235B)",
-    desc: "硅基流动 - 阿里最新大模型，中文理解优秀",
-    provider: "siliconflow",
-  },
-];
+const ANALYSIS_MODEL = "gpt-5";
 
 const BASE_PROFILE_QUESTIONS: QuestionItem[] = [
   {
-    id: "best_result",
+    id: "favorite_product",
     stage: "base",
-    question: "你最能证明自己能力的一段经历是什么？",
-    placeholder: "请用 STAR 方式回答：背景、你的动作、结果；尽量带数字或外部反馈...",
+    question: "你觉得最牛的一个产品是什么？为什么？",
+    placeholder: "产品名 + 你最服的一点，1-2 句就行",
     type: "text",
-    helperText: "这题主要看结果证据和个人贡献，不要只写“参与了什么”。",
+    helperText: "不用回答得很标准，说真实想法就行。",
   },
   {
-    id: "role_in_team",
+    id: "vibe_coding_experience",
     stage: "base",
-    question: "在团队里你通常扮演什么角色？",
+    question: "你做过 Vibe Coding 吗？",
     type: "choice",
-    options: TEAM_ROLE_OPTIONS,
+    options: VIBE_CODING_OPTIONS,
   },
   {
-    id: "why_fit",
-    stage: "base",
-    getQuestion: (ctx) => `如果面试官问「为什么你适合${ctx.role === "other" ? "这个方向" : "这个岗位方向"}」，你会怎么回答？`,
-    placeholder: "不要泛泛而谈，最好给出一段和岗位直接相关的经历或证据...",
-    type: "text",
-    helperText: "这题主要看岗位动机是否真实，以及和过往经历是否对得上。",
-  },
-];
-
-const ROLE_SPECIFIC_QUESTIONS: QuestionItem[] = [
-  {
-    id: "product_problem_definition",
+    id: "deepest_case",
     stage: "role",
-    roles: ["product", "ai_product"],
-    question: "给你一个模糊需求时，你会怎么定义问题、拆清目标，再决定先做什么？",
-    placeholder: "举一段真实经历，说明你如何界定用户问题、目标和优先级...",
-    type: "text",
-  },
-  {
-    id: "product_tradeoff",
-    stage: "role",
-    roles: ["product", "ai_product"],
-    question: "你做过一次什么需求取舍？你砍掉了什么，为什么？",
-    placeholder: "不要只说“平衡了资源”，请说清楚你的判断依据和最终影响...",
-    type: "text",
-  },
-  {
-    id: "operation_growth_case",
-    stage: "role",
-    roles: ["operation"],
-    question: "你做过最像“运营动作”的一次增长或转化提升是什么？",
-    placeholder: "请说清楚目标指标、具体动作、结果，以及你亲自负责了哪部分...",
-    type: "text",
-  },
-  {
-    id: "operation_reuse",
-    stage: "role",
-    roles: ["operation"],
-    question: "做完一次活动或增长实验后，你通常会沉淀什么可以复用的东西？",
-    placeholder: "例如方法论、SOP、渠道判断、内容模板、复盘机制等...",
-    type: "text",
-  },
-  {
-    id: "data_diagnosis",
-    stage: "role",
-    roles: ["data"],
-    question: "如果某个核心指标突然异常，你第一步会怎么排查？",
-    placeholder: "说明你会先看什么、怎么切维度、如何判断是数据问题还是业务问题...",
-    type: "text",
-  },
-  {
-    id: "data_business_value",
-    stage: "role",
-    roles: ["data"],
-    question: "你做过最有业务价值的一次分析是什么？",
-    placeholder: "不要只讲分析过程，要说明分析结论最终推动了什么业务动作...",
-    type: "text",
-  },
-  {
-    id: "development_debug",
-    stage: "role",
-    roles: ["development"],
-    question: "你独立排查过最复杂的一次技术问题是什么？",
-    placeholder: "请说明现象、排查路径、定位依据，以及最后如何修复...",
-    type: "text",
-  },
-  {
-    id: "development_ownership",
-    stage: "role",
-    roles: ["development"],
-    question: "你做过哪个项目最能体现你的独立负责能力？",
-    placeholder: "说清楚真正由你独立负责的模块，而不是团队整体完成了什么...",
-    type: "text",
-  },
-  {
-    id: "design_balance",
-    stage: "role",
-    roles: ["design"],
-    question: "你怎么平衡视觉效果、用户体验和实现成本？",
-    placeholder: "请举一个真实项目，说清楚你做过的取舍，而不是只谈设计理念...",
-    type: "text",
-  },
-  {
-    id: "design_portfolio_case",
-    stage: "role",
-    roles: ["design"],
-    question: "你最希望面试官看你哪个作品？为什么它最能代表你？",
-    placeholder: "可以从问题定义、方案迭代、最终效果三个层面回答...",
-    type: "text",
-  },
-  {
-    id: "other_transfer_reason",
-    stage: "role",
-    roles: ["other"],
-    question: "你为什么想投这个方向，而不是继续沿着原来的经历走？",
-    placeholder: "如果是转岗，请直接讲转岗原因、已有积累，以及现在最大的差距...",
-    type: "text",
-  },
-  {
-    id: "other_role_evidence",
-    stage: "role",
-    roles: ["other"],
-    question: "你现在手里有什么证据，能证明自己不是“只想试试”这个方向？",
-    placeholder: "例如相关项目、实习、作品、研究、输出内容等...",
-    type: "text",
-  },
-];
-
-const FOLLOWUP_PROFILE_QUESTIONS: QuestionItem[] = [
-  {
-    id: "portfolio_showcase",
-    stage: "followup",
-    type: "text",
-    shouldShow: (ctx) => ctx.hasPortfolio === "yes",
-    getQuestion: (ctx) => `如果只能让面试官看你作品集里的一个内容，你最希望他看什么？为什么它最能说明你适合${ctx.role === "other" ? "这个方向" : "这个岗位"}？`,
-    placeholder: "说清楚这个作品对应的问题、你的角色和最能证明你的部分...",
-  },
-  {
-    id: "portfolio_gap",
-    stage: "followup",
-    type: "text",
-    shouldShow: (ctx) => ctx.hasPortfolio === "no",
-    getQuestion: (ctx) => `你目前没有作品集，如果现在去投${ctx.role === "other" ? "这个方向" : "这个岗位"}，你最担心面试官质疑你哪一点？`,
-    placeholder: "直接回答最大的缺口，不要写“都还好”这种空话...",
-  },
-  {
-    id: "team_role_followup",
-    stage: "followup",
-    type: "text",
-    shouldShow: (ctx) => !!ctx.answers.role_in_team,
     getQuestion: (ctx) => {
-      const roleLabel = ctx.answers.role_in_team;
-      if (roleLabel === "统筹者") return "你最近一次作为统筹者推进事情落地时，具体是怎么拆分任务和对齐节奏的？";
-      if (roleLabel === "执行者") return "你最近一次把一个模糊想法真正落地时，第一步做了什么，最后产出了什么？";
-      if (roleLabel === "创意者") return "你最近一次提出一个新方案并被采纳时，为什么它能成立？";
-      if (roleLabel === "协调者") return "你最近一次解决分歧或推动多方协作时，是怎么把事情推进下去的？";
-      if (roleLabel === "分析者") return "你最近一次靠分析判断推动一个结论时，怎么证明你的判断是靠谱的？";
-      if (roleLabel === "支持者") return "你最近一次在团队中补位或兜底时，具体补了哪个关键缺口？";
-      return "结合你在团队中的常见角色，再讲一个能证明这点的具体例子。";
+      if (ctx.role === "product" || ctx.role === "ai_product") return "讲一个你做过、印象最深的需求";
+      if (ctx.role === "operation") return "讲一个你做过、印象最深的运营动作";
+      if (ctx.role === "data") return "讲一个你做过、印象最深的分析题目";
+      if (ctx.role === "development") return "讲一个你做过、印象最深的功能";
+      if (ctx.role === "design") return "讲一个你做过、印象最深的设计需求";
+      return "讲一个你做过、印象最深的一件事";
     },
-    placeholder: "尽量聚焦一件事，讲清楚你的动作和结果...",
-  },
-  {
-    id: "result_evidence_followup",
-    stage: "followup",
+    getPlaceholder: (ctx) => {
+      if (ctx.role === "product" || ctx.role === "ai_product") {
+        return "它要解决什么问题？你为什么对它印象深？";
+      }
+      if (ctx.role === "operation") {
+        return "你做了什么动作？目标是什么？为什么它让你印象深？";
+      }
+      if (ctx.role === "data") {
+        return "你分析了什么问题？最后得出了什么结论？";
+      }
+      if (ctx.role === "development") {
+        return "这个功能是做什么的？难点在哪？你做了什么？";
+      }
+      if (ctx.role === "design") {
+        return "这个设计要解决什么体验问题？你做了哪些关键决定？";
+      }
+      return "说清楚背景、你做了什么、为什么这件事让你印象深。";
+    },
     type: "text",
-    shouldShow: (ctx) => !!ctx.answers.best_result && !/\d/.test(ctx.answers.best_result),
-    question: "你刚才提到的那段经历里，有没有任何可量化结果、外部反馈或可验证证据？",
-    placeholder: "哪怕没有精确数字，也请给出可验证的结果信号，例如上线、被采纳、复用、获奖、正反馈...",
-  },
-  {
-    id: "fit_detail_followup",
-    stage: "followup",
-    type: "text",
-    shouldShow: (ctx) => (ctx.answers.why_fit || "").trim().length > 0 && (ctx.answers.why_fit || "").trim().length < 20,
-    getQuestion: (ctx) => `你刚才对“为什么适合${ctx.role === "other" ? "这个方向" : "这个岗位"}”回答得比较泛。请补一个最直接的例子证明你的岗位相关性。`,
-    placeholder: "请用一段具体经历回答，不要再写抽象形容词...",
+    helperText: "一句话起步也可以，不用写太长。",
   },
 ];
 
@@ -615,14 +471,54 @@ function getQuestionRoleKey(selectedDirection: string) {
   return selectedDirection || "other";
 }
 
-function getDynamicQuestions(role: string, answers: Record<string, string>, hasPortfolio: "" | "yes" | "no") {
-  const ctx: QuestionFlowContext = { role, answers, hasPortfolio };
-  const roleQuestions = ROLE_SPECIFIC_QUESTIONS.filter((item) => !item.roles || item.roles.includes(role)).slice(0, 2);
-  const followupQuestions = FOLLOWUP_PROFILE_QUESTIONS
-    .filter((item) => (item.shouldShow ? item.shouldShow(ctx) : true))
-    .slice(0, 2);
+function buildMockInterviewJd(direction: string, roleLabel: string) {
+  const displayRole = roleLabel.trim() || "目标岗位";
 
-  return [...BASE_PROFILE_QUESTIONS, ...roleQuestions, ...followupQuestions].map((item) => ({
+  if (direction === "product") {
+    return `${displayRole}（通用要求）：
+- 能独立完成需求分析、方案设计与推动落地
+- 具备用户洞察、产品判断和跨团队协作能力
+- 能从实际业务问题中抽象目标、优先级和验证方法`;
+  }
+  if (direction === "ai_product") {
+    return `${displayRole}（通用要求）：
+- 理解大模型/AI产品的能力边界，能把技术能力转成产品价值
+- 能完成需求设计、效果评估与迭代优化
+- 关注用户体验、业务结果与落地效率`;
+  }
+  if (direction === "operation") {
+    return `${displayRole}（通用要求）：
+- 能围绕增长、转化或内容目标设计运营动作
+- 具备复盘沉淀、数据分析和跨团队协同能力
+- 能把运营动作落到具体执行和结果追踪上`;
+  }
+  if (direction === "data") {
+    return `${displayRole}（通用要求）：
+- 能定位业务问题并设计分析思路
+- 熟悉指标拆解、异常排查和业务洞察输出
+- 能把分析结论转化为实际决策建议`;
+  }
+  if (direction === "development") {
+    return `${displayRole}（通用要求）：
+- 能独立负责功能开发、问题排查和性能优化
+- 具备良好的工程实现能力与协作能力
+- 能结合真实业务场景说明技术取舍与落地结果`;
+  }
+  if (direction === "design") {
+    return `${displayRole}（通用要求）：
+- 能基于用户问题完成设计方案并推动落地
+- 兼顾体验、视觉表达和实现成本
+- 能清楚说明设计思路、迭代过程和结果反馈`;
+  }
+  return `${displayRole}（通用要求）：
+- 请结合候选人简历内容，围绕岗位相关能力生成面试题
+- 重点考察真实经历、问题解决能力、表达与思考深度
+- 优先追问候选人最有代表性的项目、成果与判断`;
+}
+
+function getDynamicQuestions(role: string) {
+  const ctx: QuestionFlowContext = { role, answers: {}, hasPortfolio: "" };
+  return BASE_PROFILE_QUESTIONS.map((item) => ({
     ...item,
     question: item.getQuestion ? item.getQuestion(ctx) : item.question || "",
     placeholder: item.getPlaceholder ? item.getPlaceholder(ctx) : item.placeholder,
@@ -667,10 +563,10 @@ export default function Home() {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [talentProfile, setTalentProfile] = useState<TalentProfileData | null>(null);
   const [showSample, setShowSample] = useState(false);
-  const [selectedModel, setSelectedModel] = useState("gpt-5"); // 默认使用 GPT-5
+  const [showInterviewPrompt, setShowInterviewPrompt] = useState(false);
   const dynamicQuestions = useMemo(
-    () => getDynamicQuestions(getQuestionRoleKey(selectedDirection), questionAnswers, hasPortfolio),
-    [selectedDirection, questionAnswers, hasPortfolio]
+    () => getDynamicQuestions(getQuestionRoleKey(selectedDirection)),
+    [selectedDirection]
   );
   const currentQuestion = dynamicQuestions[currentQuestionIndex];
   const activeFeatureBanner = FEATURE_BANNER_VERSIONS.find((item) => item.id === selectedFeatureVersion) || FEATURE_BANNER_VERSIONS[0];
@@ -831,6 +727,19 @@ export default function Home() {
     return () => clearInterval(timer!);
   }, [loading]);
 
+  useEffect(() => {
+    if (currentStep !== "result" || !talentProfile || !resumeText.trim()) {
+      setShowInterviewPrompt(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setShowInterviewPrompt(true);
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [currentStep, talentProfile, resumeText]);
+
   // 能力画像生成函数
   async function handleProfileGenerate() {
     if (!file) return;
@@ -864,7 +773,7 @@ export default function Home() {
         })
       );
       formData.append("mode", "talent_profile"); // 标记为能力画像模式
-      formData.append("model", selectedModel); // 传递选择的AI模型
+      formData.append("model", ANALYSIS_MODEL);
 
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -929,6 +838,28 @@ export default function Home() {
     }
   }
 
+  function handleGenerateInterviewFromReport() {
+    if (typeof window === "undefined") return;
+    if (!resumeText.trim()) {
+      alert("当前没有可用于生成题库的简历内容。");
+      return;
+    }
+
+    const payload = {
+      projectName: `${targetRole?.trim() || "能力画像"} - 模拟面试题库`,
+      jdContent: buildMockInterviewJd(selectedDirection, targetRole),
+      resumeContent: resumeText.trim(),
+      autoGenerate: true,
+    };
+
+    try {
+      window.localStorage.setItem(MOCK_INTERVIEW_AUTO_CREATE_KEY, JSON.stringify(payload));
+    } catch {}
+
+    setShowInterviewPrompt(false);
+    window.location.href = "/mock-interview";
+  }
+
   // 重置能力画像流程
   function resetProfileFlow() {
     setCurrentStep("upload");
@@ -943,6 +874,7 @@ export default function Home() {
     setTalentProfile(null);
     setResumeText("");
     setResult("");
+    setShowInterviewPrompt(false);
   }
 
   async function handleUpload() {
@@ -1103,13 +1035,6 @@ export default function Home() {
                   面试复盘
                 </a>
                 <a
-                  href="/snail-island"
-                  className="block px-4 py-3 text-sm font-medium text-gray-200 hover:bg-white/10 hover:text-purple-400 transition"
-                  onClick={() => setMenuOpen(false)}
-                >
-                  蜗牛岛
-                </a>
-                <a
                   href="/promo"
                   className="block px-4 py-3 text-sm font-medium text-purple-300 bg-gradient-to-r from-purple-500/20 to-pink-500/20 hover:from-purple-500/30 hover:to-pink-500/30 hover:text-purple-200 transition rounded-b-xl border-t border-purple-500/20"
                   onClick={() => setMenuOpen(false)}
@@ -1168,7 +1093,7 @@ export default function Home() {
             3分钟看清：你最像什么样的人、强项在哪、适合什么岗位
           </p>
           <p className="text-center text-slate-400 text-sm mb-6">
-            上传简历 + 回答5个问题，生成可分享的个人能力画像报告
+            上传简历 + 回答 3 个问题，生成可分享的个人能力画像报告
           </p>
         </>
       )}
@@ -1781,31 +1706,6 @@ export default function Home() {
                 </label>
               </div>
 
-              {/* AI 模型选择 */}
-              <div className="mb-6">
-                <label className="block text-sm text-slate-400 mb-3">选择分析模型</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {AI_MODEL_OPTIONS.map((model) => (
-                    <button
-                      key={model.value}
-                      onClick={() => setSelectedModel(model.value)}
-                      className={`p-3 rounded-xl border-2 text-left transition ${
-                        selectedModel === model.value
-                          ? "border-purple-500 bg-purple-500/20"
-                          : "border-gray-700 bg-black/50 hover:border-gray-600"
-                      }`}
-                    >
-                      <div className={`font-medium text-sm mb-1 ${
-                        selectedModel === model.value ? "text-purple-300" : "text-white"
-                      }`}>
-                        {model.label}
-                      </div>
-                      <div className="text-xs text-slate-400">{model.desc}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* 下一步按钮 */}
               <button
                 onClick={() => {
@@ -1813,7 +1713,7 @@ export default function Home() {
                     alert("请先上传简历文件");
                     return;
                   }
-                  track("profile_test_started", { model: selectedModel });
+                  track("profile_test_started", { model: ANALYSIS_MODEL });
                   setCurrentStep("direction");
                 }}
                 disabled={!file}
@@ -2138,6 +2038,44 @@ export default function Home() {
               </div>
 
               <div className="h-40" />
+            </div>
+          )}
+
+          {showInterviewPrompt && currentStep === "result" && talentProfile && (
+            <div className="fixed inset-x-4 bottom-6 z-[70] flex justify-center pointer-events-none">
+              <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-cyan-500/40 bg-slate-950/95 shadow-[0_20px_80px_rgba(34,211,238,0.16)] backdrop-blur-md p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-semibold text-cyan-300 mb-2">看完报告了？</p>
+                    <h3 className="text-lg font-semibold text-white leading-snug mb-2">基于这份简历，一键生成模拟面试题目</h3>
+                    <p className="text-sm text-slate-400 leading-6">会自动带入当前简历内容和岗位方向，跳转到模拟面试并开始建题。</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowInterviewPrompt(false)}
+                    className="text-slate-500 hover:text-slate-300 transition text-lg leading-none"
+                    aria-label="关闭提示"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="mt-4 flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowInterviewPrompt(false)}
+                    className="flex-1 rounded-xl border border-slate-700 bg-black/40 px-4 py-3 text-sm font-medium text-slate-300 hover:bg-white/5 transition"
+                  >
+                    稍后再说
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateInterviewFromReport}
+                    className="flex-1 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 px-4 py-3 text-sm font-semibold text-white hover:brightness-110 transition"
+                  >
+                    去生成题目
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

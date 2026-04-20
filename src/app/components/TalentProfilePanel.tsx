@@ -521,7 +521,15 @@ function normalizeProfileData(raw: unknown): TalentProfileData | null {
   };
 }
 
-export default function TalentProfilePanel({ data: rawData, onSave, onShare }: { data: TalentProfileData; onSave?: () => void; onShare?: () => void }) {
+export default function TalentProfilePanel({
+  data: rawData,
+  onSave,
+  onShare,
+}: {
+  data: TalentProfileData;
+  onSave?: () => void;
+  onShare?: () => void;
+}) {
   const data = normalizeProfileData(rawData as unknown) ?? rawData;
   const [showCopied, setShowCopied] = useState(false);
   const profileTag = getProfileTagMeta(data.hexagonScores);

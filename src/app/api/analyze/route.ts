@@ -7,6 +7,8 @@ import PDFParser from "pdf2json";
 import { createClient } from "@supabase/supabase-js";
 import { addRecord, calculateRank } from "@/utils/recordStore";
 
+const ANALYSIS_MODEL = "gpt-5";
+
 // === 全局错误捕获 ===
 process.on("uncaughtException", (err) => {
   console.error("💥 未捕获异常:", err);
@@ -151,7 +153,7 @@ export async function POST(req: Request) {
     const jd = (data.get("jd") as string) || "";
     const mode = (data.get("mode") as string) || "legacy";
     const questionAnswers = (data.get("question_answers") as string) || "{}";
-    const model = (data.get("model") as string) || "gpt-5";
+    const model = ANALYSIS_MODEL;
     const hasPortfolio = (data.get("has_portfolio") as string) || "no";
     const portfolioLink = (data.get("portfolio_link") as string) || "";
     const portfolioFile = data.get("portfolio_file");
@@ -167,6 +169,7 @@ export async function POST(req: Request) {
     // ✅ 2️⃣ 上传文件到 Supabase Storage（如果配置了）
     const supabase = getSupabaseClient();
     let fileUrl = "";
+    let portfolioFileUrl = "";
 
     if (supabase) {
       const cleanName = file.name.replace(/[^\w.-]/g, "_");
@@ -187,6 +190,30 @@ export async function POST(req: Request) {
           .getPublicUrl(fileName);
         fileUrl = publicUrlData.publicUrl;
         console.log("✅ 上传成功:", fileUrl);
+      }
+
+      if (portfolioFile instanceof File) {
+        const cleanPortfolioName = portfolioFile.name.replace(/[^\w.-]/g, "_");
+        const portfolioStorageName = `${Date.now()}_portfolio_${cleanPortfolioName}`;
+        const portfolioArrayBufferForUpload = await portfolioFile.arrayBuffer();
+        const portfolioBufferForUpload = Buffer.from(portfolioArrayBufferForUpload);
+
+        const { error: portfolioUploadError } = await supabase.storage
+          .from("uploads")
+          .upload(portfolioStorageName, portfolioBufferForUpload, {
+            contentType: portfolioFile.type,
+            upsert: true,
+          });
+
+        if (portfolioUploadError) {
+          console.warn("⚠️ 作品集文件上传失败:", portfolioUploadError);
+        } else {
+          const { data: portfolioPublicUrlData } = supabase.storage
+            .from("uploads")
+            .getPublicUrl(portfolioStorageName);
+          portfolioFileUrl = portfolioPublicUrlData.publicUrl;
+          console.log("✅ 作品集上传成功:", portfolioFileUrl);
+        }
       }
     } else {
       console.log("📄 跳过文件上传（Supabase 未配置）");
@@ -431,13 +458,7 @@ ${text}
 
     let result: string;
 
-    if (model.startsWith("Qwen/") || model.includes("siliconflow")) {
-      // 使用硅基流动 (SiliconFlow)
-      result = await callSiliconFlow(model, prompt);
-    } else {
-      // 使用 OpenAI
-      result = await callOpenAI(model, prompt);
-    }
+    result = await callOpenAI(model, prompt);
 
     console.log("🟢 [Step 11] AI 分析完成, 输出长度:", result.length);
 
@@ -484,6 +505,7 @@ ${text}
       rankPercent,
       total,
       fileUrl,
+      portfolioFileUrl,
     });
   } catch (err: any) {
     console.error("❌ [SERVER ERROR] 捕获异常:", err);
@@ -538,32 +560,3 @@ async function callOpenAI(model: string, prompt: string): Promise<string> {
   return completion.output_text || "AI 未返回结果";
 }
 
-// 调用 SiliconFlow API
-async function callSiliconFlow(model: string, prompt: string): Promise<string> {
-  const apiKey = process.env.SILICONFLOW_API_KEY;
-  if (!apiKey) {
-    throw new Error("SILICONFLOW_API_KEY 未配置");
-  }
-
-  const response = await fetch("https://api.siliconflow.cn/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: model,
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
-      max_tokens: 4000,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`SiliconFlow API 错误: ${error}`);
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || "AI 未返回结果";
-}
